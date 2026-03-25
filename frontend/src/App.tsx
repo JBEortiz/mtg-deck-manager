@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import AppHeader from "./components/AppHeader";
 import DeckSidebar from "./components/DeckSidebar";
 import DeckDetails from "./components/DeckDetails";
@@ -12,11 +12,13 @@ import {
   fetchDeckStats,
   fetchDecks,
   fetchHealth,
+  fetchScryfallAutocomplete,
+  fetchScryfallCardByName,
   importDecklist,
   updateCard,
   updateDeck
 } from "./services/api";
-import { Card, CardFilters, Deck, DeckStats, ImportResult } from "./types/models";
+import { Card, CardFilters, CardLookupResult, Deck, DeckStats, ImportResult } from "./types/models";
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Unknown error";
@@ -58,6 +60,13 @@ function App() {
   const [updateDeckError, setUpdateDeckError] = useState("");
   const [updateDeckValidationErrors, setUpdateDeckValidationErrors] = useState<string[]>([]);
   const [updatingDeck, setUpdatingDeck] = useState(false);
+
+  const [cardLookupQuery, setCardLookupQuery] = useState("");
+  const [cardSuggestions, setCardSuggestions] = useState<string[]>([]);
+  const [cardLookupLoading, setCardLookupLoading] = useState(false);
+  const [cardLookupError, setCardLookupError] = useState("");
+  const autocompleteCacheRef = useRef<Map<string, string[]>>(new Map());
+  const cardDetailsCacheRef = useRef<Map<string, CardLookupResult>>(new Map());
 
   const [cardName, setCardName] = useState("");
   const [cardManaValue, setCardManaValue] = useState(0);
@@ -139,6 +148,38 @@ function App() {
   useEffect(() => {
     void loadDecks();
   }, []);
+
+  useEffect(() => {
+    const query = cardLookupQuery.trim();
+    if (query.length < 2) {
+      setCardSuggestions([]);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      setCardLookupError("");
+
+      const cached = autocompleteCacheRef.current.get(query.toLowerCase());
+      if (cached) {
+        setCardSuggestions(cached);
+        return;
+      }
+
+      setCardLookupLoading(true);
+      try {
+        const results = await fetchScryfallAutocomplete(query);
+        autocompleteCacheRef.current.set(query.toLowerCase(), results);
+        setCardSuggestions(results);
+      } catch (error) {
+        setCardSuggestions([]);
+        setCardLookupError(getErrorMessage(error));
+      } finally {
+        setCardLookupLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [cardLookupQuery]);
 
   const checkHealth = async () => {
     setHealth("");
@@ -231,6 +272,37 @@ function App() {
     }
   };
 
+  const onSelectSuggestion = async (name: string) => {
+    setCardLookupError("");
+    setCardLookupQuery(name);
+    setCardSuggestions([]);
+
+    const cached = cardDetailsCacheRef.current.get(name.toLowerCase());
+    if (cached) {
+      setCardName(cached.name);
+      setCardManaValue(cached.manaValue);
+      setCardType(cached.type);
+      setCardColors(cached.colors);
+      setNotice(`Loaded ${cached.name} into the form.`);
+      return;
+    }
+
+    setCardLookupLoading(true);
+    try {
+      const card = await fetchScryfallCardByName(name);
+      cardDetailsCacheRef.current.set(name.toLowerCase(), card);
+      setCardName(card.name);
+      setCardManaValue(card.manaValue);
+      setCardType(card.type);
+      setCardColors(card.colors);
+      setNotice(`Loaded ${card.name} into the form.`);
+    } catch (error) {
+      setCardLookupError(getErrorMessage(error));
+    } finally {
+      setCardLookupLoading(false);
+    }
+  };
+
   const onApplyCardFilters = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedDeck) {
@@ -283,6 +355,8 @@ function App() {
       setCardType("");
       setCardColors("");
       setCardQuantity(1);
+      setCardLookupQuery("");
+      setCardSuggestions([]);
       await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
       setNotice("Card added.");
     } catch (error) {
@@ -453,6 +527,12 @@ function App() {
           onCardSortChange={setCardSort}
           onApplyCardFilters={(event) => void onApplyCardFilters(event)}
           onResetCardFilters={() => void onResetCardFilters()}
+          cardLookupQuery={cardLookupQuery}
+          cardSuggestions={cardSuggestions}
+          cardLookupLoading={cardLookupLoading}
+          cardLookupError={cardLookupError}
+          onCardLookupQueryChange={setCardLookupQuery}
+          onSelectSuggestion={(name) => void onSelectSuggestion(name)}
           cardName={cardName}
           cardManaValue={cardManaValue}
           cardType={cardType}

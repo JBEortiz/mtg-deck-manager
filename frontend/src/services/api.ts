@@ -1,4 +1,4 @@
-import { ApiErrorResponse, Card, CardFilters, Deck, DeckStats, ImportResult } from "../types/models";
+import { ApiErrorResponse, Card, CardFilters, CardLookupResult, Deck, DeckStats, ImportResult } from "../types/models";
 
 const API_BASE_URL = "http://localhost:8080/api";
 
@@ -108,6 +108,24 @@ export async function fetchDeckStats(deckId: number): Promise<DeckStats> {
 
 export async function fetchDeckCards(deckId: number, filters: CardFilters): Promise<Card[]> {
   const response = await fetch(buildCardsUrl(deckId, filters));
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.json();
+}
+
+export async function fetchScryfallAutocomplete(query: string): Promise<string[]> {
+  const params = new URLSearchParams({ query });
+  const response = await fetch(`${API_BASE_URL}/scryfall/autocomplete?${params.toString()}`);
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.json();
+}
+
+export async function fetchScryfallCardByName(name: string): Promise<CardLookupResult> {
+  const params = new URLSearchParams({ name });
+  const response = await fetch(`${API_BASE_URL}/scryfall/card?${params.toString()}`);
   if (!response.ok) {
     throw await parseError(response);
   }

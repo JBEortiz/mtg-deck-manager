@@ -39,3 +39,10 @@ export type ApiErrorResponse = {
   message?: string;
   errors?: string[];
 };
+
+export type CardLookupResult = {
+  name: string;
+  manaValue: number;
+  type: string;
+  colors: string;
+};

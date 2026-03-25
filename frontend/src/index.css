@@ -240,6 +240,43 @@ select:focus {
   color: #b91c1c;
 }
 
+.lookup-box {
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: #f9fafb;
+  padding: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.lookup-results {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.lookup-result-btn {
+  width: 100%;
+  text-align: left;
+  background: #ffffff;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 0.6rem;
+  cursor: pointer;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.lookup-result-btn:hover {
+  background: #f9fafb;
+}
+
+.lookup-result-btn span {
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
 .card-list {
   list-style: none;
   margin: 0;

@@ -34,6 +34,12 @@ type DeckDetailsProps = {
   onCardSortChange: (value: string) => void;
   onApplyCardFilters: (event: FormEvent) => void;
   onResetCardFilters: () => void;
+  cardLookupQuery: string;
+  cardSuggestions: string[];
+  cardLookupLoading: boolean;
+  cardLookupError: string;
+  onCardLookupQueryChange: (value: string) => void;
+  onSelectSuggestion: (name: string) => void;
   cardName: string;
   cardManaValue: number;
   cardType: string;
@@ -102,6 +108,12 @@ function DeckDetails(props: DeckDetailsProps) {
     onCardSortChange,
     onApplyCardFilters,
     onResetCardFilters,
+    cardLookupQuery,
+    cardSuggestions,
+    cardLookupLoading,
+    cardLookupError,
+    onCardLookupQueryChange,
+    onSelectSuggestion,
     cardName,
     cardManaValue,
     cardType,
@@ -252,6 +264,30 @@ function DeckDetails(props: DeckDetailsProps) {
                 <button className="btn secondary" type="button" onClick={onResetCardFilters}>Reset</button>
               </div>
             </form>
+
+            <div className="form lookup-box">
+              <label className="field">
+                <span>Search Real Card (Scryfall)</span>
+                <input
+                  value={cardLookupQuery}
+                  onChange={(event) => onCardLookupQueryChange(event.target.value)}
+                  placeholder="Start typing card name"
+                />
+              </label>
+              {cardLookupLoading && <p className="muted">Searching suggestions...</p>}
+              {cardLookupError && <p className="error">{cardLookupError}</p>}
+              {cardSuggestions.length > 0 && (
+                <ul className="lookup-results">
+                  {cardSuggestions.map((name) => (
+                    <li key={name}>
+                      <button className="lookup-result-btn" type="button" onClick={() => onSelectSuggestion(name)}>
+                        <strong>{name}</strong>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <form onSubmit={onAddCard} className="form grid-5">
               <label className="field"><span>Name</span><input value={cardName} onChange={(event) => onCardNameChange(event.target.value)} required /></label>

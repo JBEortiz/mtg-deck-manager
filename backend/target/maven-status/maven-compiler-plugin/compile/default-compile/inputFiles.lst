@@ -1,3 +1,10 @@
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupClient.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupController.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupException.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupNotFoundException.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupResult.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\CardLookupTimeoutException.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\cardlookup\ScryfallCardLookupClient.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\config\ApiExceptionHandler.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\config\CorsConfig.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\controller\HealthController.java
