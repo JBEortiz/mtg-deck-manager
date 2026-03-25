@@ -1,3 +1,4 @@
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\config\ApiExceptionHandler.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\config\CorsConfig.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\controller\HealthController.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\Card.java
@@ -5,6 +6,9 @@ C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\d
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\Deck.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckCardController.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckController.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckImportController.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckRepository.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckStatsController.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckValidationException.java
+C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\deck\DeckValidationService.java
 C:\workspace\mtg-deck-manager\backend\src\main\java\com\example\mtgdeckmanager\MtgDeckManagerApplication.java

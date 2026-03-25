@@ -24,7 +24,32 @@ type DeckStats = {
   manaCurve: Record<string, number>;
 };
 
+type ImportResult = {
+  importedCount: number;
+  createdCards: Array<{ id: number; name: string; quantity: number }>;
+  errors: Array<{ line: number; message: string; rawLine: string }>;
+};
+
+type ApiErrorResponse = {
+  message?: string;
+  errors?: string[];
+};
+
 const API_BASE_URL = "http://localhost:8080/api";
+
+async function parseApiError(response: Response): Promise<{ message: string; errors: string[] }> {
+  const fallback = `Request failed with status ${response.status}`;
+
+  try {
+    const data = (await response.json()) as ApiErrorResponse;
+    return {
+      message: data.message ?? fallback,
+      errors: Array.isArray(data.errors) ? data.errors : []
+    };
+  } catch {
+    return { message: fallback, errors: [] };
+  }
+}
 
 function App() {
   const [health, setHealth] = useState("");
@@ -52,7 +77,19 @@ function App() {
   const [cardColors, setCardColors] = useState("");
   const [cardQuantity, setCardQuantity] = useState(1);
   const [cardError, setCardError] = useState("");
+  const [cardValidationErrors, setCardValidationErrors] = useState<string[]>([]);
   const [savingCard, setSavingCard] = useState(false);
+
+  const [cardSearch, setCardSearch] = useState("");
+  const [cardTypeFilter, setCardTypeFilter] = useState("");
+  const [cardColorFilter, setCardColorFilter] = useState("");
+  const [cardSort, setCardSort] = useState("name:asc");
+
+  const [decklistText, setDecklistText] = useState("");
+  const [importingDecklist, setImportingDecklist] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   const loadDecks = async () => {
     setDecksError("");
@@ -72,7 +109,26 @@ function App() {
   const loadDeckCards = async (deckId: number) => {
     setCardsError("");
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deckId}/cards`);
+      const params = new URLSearchParams();
+      if (cardSearch.trim()) {
+        params.set("name", cardSearch.trim());
+      }
+      if (cardTypeFilter.trim()) {
+        params.set("type", cardTypeFilter.trim());
+      }
+      if (cardColorFilter.trim()) {
+        params.set("color", cardColorFilter.trim());
+      }
+      const [sortBy, direction] = cardSort.split(":");
+      if (sortBy) {
+        params.set("sortBy", sortBy);
+      }
+      if (direction) {
+        params.set("direction", direction);
+      }
+
+      const query = params.toString();
+      const response = await fetch(`${API_BASE_URL}/decks/${deckId}/cards${query ? `?${query}` : ""}`);
       if (!response.ok) {
         throw new Error(`Request failed with status ${response.status}`);
       }
@@ -143,6 +199,7 @@ function App() {
       setSelectedDeck(createdDeck);
       setCards([]);
       setStats(null);
+      setImportResult(null);
       await loadDeckCards(createdDeck.id);
       await loadDeckStats(createdDeck.id);
     } catch (err) {
@@ -160,11 +217,41 @@ function App() {
       }
       const deck = (await response.json()) as Deck;
       setSelectedDeck(deck);
+      setImportResult(null);
+      setImportValidationErrors([]);
       await loadDeckCards(deck.id);
       await loadDeckStats(deck.id);
     } catch (err) {
       setCreateDeckError(err instanceof Error ? err.message : "Unknown error");
     }
+  };
+
+  const onApplyCardFilters = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedDeck) {
+      return;
+    }
+    await loadDeckCards(selectedDeck.id);
+  };
+
+  const onResetCardFilters = async () => {
+    setCardSearch("");
+    setCardTypeFilter("");
+    setCardColorFilter("");
+    setCardSort("name:asc");
+
+    if (!selectedDeck) {
+      return;
+    }
+
+    const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/cards?sortBy=name&direction=asc`);
+    if (!response.ok) {
+      setCards([]);
+      setCardsError(`Request failed with status ${response.status}`);
+      return;
+    }
+    const data = (await response.json()) as Card[];
+    setCards(data);
   };
 
   const onAddCard = async (event: FormEvent) => {
@@ -174,6 +261,7 @@ function App() {
     }
 
     setCardError("");
+    setCardValidationErrors([]);
     setSavingCard(true);
 
     try {
@@ -192,7 +280,10 @@ function App() {
       });
 
       if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
+        const errorResponse = await parseApiError(response);
+        setCardError(errorResponse.message);
+        setCardValidationErrors(errorResponse.errors);
+        return;
       }
 
       setCardName("");
@@ -215,6 +306,7 @@ function App() {
     }
 
     setCardError("");
+    setCardValidationErrors([]);
     try {
       const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/cards/${cardId}`, {
         method: "DELETE"
@@ -228,6 +320,45 @@ function App() {
       await loadDeckStats(selectedDeck.id);
     } catch (err) {
       setCardError(err instanceof Error ? err.message : "Unknown error");
+    }
+  };
+
+  const onImportDecklist = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedDeck) {
+      return;
+    }
+
+    setImportError("");
+    setImportValidationErrors([]);
+    setImportingDecklist(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/import`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ decklistText })
+      });
+
+      if (!response.ok) {
+        const errorResponse = await parseApiError(response);
+        setImportResult(null);
+        setImportError(errorResponse.message);
+        setImportValidationErrors(errorResponse.errors);
+        return;
+      }
+
+      const result = (await response.json()) as ImportResult;
+      setImportResult(result);
+      await loadDeckCards(selectedDeck.id);
+      await loadDeckStats(selectedDeck.id);
+    } catch (err) {
+      setImportResult(null);
+      setImportError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setImportingDecklist(false);
     }
   };
 
@@ -301,6 +432,55 @@ function App() {
               <p><strong>Created:</strong> {new Date(selectedDeck.createdAt).toLocaleString()}</p>
             </div>
 
+            <h3>Decklist Import</h3>
+            <form onSubmit={onImportDecklist} className="form">
+              <textarea
+                value={decklistText}
+                onChange={(event) => setDecklistText(event.target.value)}
+                placeholder={"4 Lightning Bolt\n2 Counterspell\n1 Sol Ring"}
+                rows={6}
+                required
+              />
+              <button type="submit" disabled={importingDecklist}>
+                {importingDecklist ? "Importing..." : "Import Decklist"}
+              </button>
+            </form>
+            {importError && <p className="error">Error: {importError}</p>}
+            {importValidationErrors.length > 0 && (
+              <ul className="deck-list error">
+                {importValidationErrors.map((error, index) => (
+                  <li key={`import-validation-${index}`}>{error}</li>
+                ))}
+              </ul>
+            )}
+            {importResult && (
+              <div>
+                <p><strong>Imported count:</strong> {importResult.importedCount}</p>
+                <p><strong>Created cards:</strong></p>
+                {importResult.createdCards.length === 0 ? (
+                  <p>None</p>
+                ) : (
+                  <ul className="deck-list">
+                    {importResult.createdCards.map((card) => (
+                      <li key={card.id}>{card.quantity}x {card.name}</li>
+                    ))}
+                  </ul>
+                )}
+                <p><strong>Errors:</strong></p>
+                {importResult.errors.length === 0 ? (
+                  <p>None</p>
+                ) : (
+                  <ul className="deck-list">
+                    {importResult.errors.map((error, index) => (
+                      <li key={`${error.line}-${index}`}>
+                        Line {error.line}: {error.message} ({error.rawLine || "empty"})
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
             <h3>Deck Stats</h3>
             {statsError && <p className="error">Error: {statsError}</p>}
             {!stats ? (
@@ -315,6 +495,36 @@ function App() {
             )}
 
             <h3>Cards</h3>
+            <form onSubmit={onApplyCardFilters} className="form">
+              <input
+                value={cardSearch}
+                onChange={(event) => setCardSearch(event.target.value)}
+                placeholder="Search by card name"
+              />
+              <input
+                value={cardTypeFilter}
+                onChange={(event) => setCardTypeFilter(event.target.value)}
+                placeholder="Filter by type (exact)"
+              />
+              <input
+                value={cardColorFilter}
+                onChange={(event) => setCardColorFilter(event.target.value)}
+                placeholder="Filter by color (exact, e.g. R)"
+              />
+              <select value={cardSort} onChange={(event) => setCardSort(event.target.value)}>
+                <option value="name:asc">Sort: Name (A-Z)</option>
+                <option value="name:desc">Sort: Name (Z-A)</option>
+                <option value="manaValue:asc">Sort: Mana Value (Low-High)</option>
+                <option value="manaValue:desc">Sort: Mana Value (High-Low)</option>
+              </select>
+              <div>
+                <button type="submit">Apply Filters</button>
+                <button type="button" className="small-button" onClick={() => void onResetCardFilters()}>
+                  Reset
+                </button>
+              </div>
+            </form>
+
             <form onSubmit={onAddCard} className="form">
               <input
                 value={cardName}
@@ -354,10 +564,17 @@ function App() {
             </form>
 
             {cardError && <p className="error">Error: {cardError}</p>}
+            {cardValidationErrors.length > 0 && (
+              <ul className="deck-list error">
+                {cardValidationErrors.map((error, index) => (
+                  <li key={`card-validation-${index}`}>{error}</li>
+                ))}
+              </ul>
+            )}
             {cardsError && <p className="error">Error: {cardsError}</p>}
 
             {cards.length === 0 ? (
-              <p>No cards yet.</p>
+              <p>No cards found.</p>
             ) : (
               <ul className="deck-list">
                 {cards.map((card) => (

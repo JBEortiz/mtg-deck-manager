@@ -34,6 +34,8 @@ h3 {
 }
 
 input,
+textarea,
+select,
 button {
   padding: 0.6rem 0.75rem;
   border: 1px solid #999;
@@ -73,3 +75,5 @@ button:disabled {
 .error {
   color: #b00020;
 }
+
+

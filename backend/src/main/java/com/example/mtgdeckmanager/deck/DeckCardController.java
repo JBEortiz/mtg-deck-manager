@@ -11,10 +11,12 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.Comparator;
 import java.util.List;
 
 @RestController
@@ -23,21 +25,79 @@ public class DeckCardController {
 
     private final DeckRepository deckRepository;
     private final CardRepository cardRepository;
+    private final DeckValidationService deckValidationService;
 
-    public DeckCardController(DeckRepository deckRepository, CardRepository cardRepository) {
+    public DeckCardController(DeckRepository deckRepository, CardRepository cardRepository, DeckValidationService deckValidationService) {
         this.deckRepository = deckRepository;
         this.cardRepository = cardRepository;
+        this.deckValidationService = deckValidationService;
     }
 
     @GetMapping
-    public List<CardResponse> listCards(@PathVariable Long deckId) {
+    public List<CardResponse> listCards(
+            @PathVariable Long deckId,
+            @RequestParam(required = false) String name,
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String color,
+            @RequestParam(required = false) String sortBy,
+            @RequestParam(required = false) String direction
+    ) {
         if (!deckRepository.existsById(deckId)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Deck not found");
         }
 
-        return cardRepository.findAllByDeckIdOrderByIdAsc(deckId).stream()
-                .map(CardResponse::from)
-                .toList();
+        List<Card> cards = cardRepository.findAllByDeckIdOrderByIdAsc(deckId);
+
+        if (name != null && !name.isBlank()) {
+            String search = name.trim().toLowerCase();
+            cards = cards.stream()
+                    .filter(card -> card.getName() != null && card.getName().toLowerCase().contains(search))
+                    .toList();
+        }
+
+        if (type != null && !type.isBlank()) {
+            String exactType = type.trim();
+            cards = cards.stream()
+                    .filter(card -> card.getType() != null && card.getType().equalsIgnoreCase(exactType))
+                    .toList();
+        }
+
+        if (color != null && !color.isBlank()) {
+            String exactColor = color.trim();
+            cards = cards.stream()
+                    .filter(card -> hasColor(card.getColors(), exactColor))
+                    .toList();
+        }
+
+        Comparator<Card> comparator = null;
+        if ("name".equalsIgnoreCase(sortBy)) {
+            comparator = Comparator.comparing(card -> card.getName() == null ? "" : card.getName(), String.CASE_INSENSITIVE_ORDER);
+        } else if ("manaValue".equalsIgnoreCase(sortBy)) {
+            comparator = Comparator.comparing(card -> card.getManaValue() == null ? 0 : card.getManaValue());
+        }
+
+        if (comparator != null) {
+            if ("desc".equalsIgnoreCase(direction)) {
+                comparator = comparator.reversed();
+            }
+            cards = cards.stream().sorted(comparator).toList();
+        }
+
+        return cards.stream().map(CardResponse::from).toList();
+    }
+
+    private boolean hasColor(String colors, String expectedColor) {
+        if (colors == null) {
+            return false;
+        }
+
+        String[] parts = colors.split(",");
+        for (String part : parts) {
+            if (part.trim().equalsIgnoreCase(expectedColor)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @PostMapping
@@ -45,6 +105,9 @@ public class DeckCardController {
     public CardResponse addCard(@PathVariable Long deckId, @Valid @RequestBody CreateCardRequest request) {
         Deck deck = deckRepository.findById(deckId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Deck not found"));
+
+        List<Card> existingCards = cardRepository.findAllByDeckIdOrderByIdAsc(deckId);
+        deckValidationService.validateCardAddition(deck, existingCards, request.name(), request.type(), request.quantity());
 
         Card card = new Card();
         card.setDeck(deck);
