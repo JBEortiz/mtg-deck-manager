@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -121,6 +122,29 @@ public class DeckCardController {
         return CardResponse.from(saved);
     }
 
+    @PutMapping("/{cardId}")
+    public CardResponse updateCard(@PathVariable Long deckId, @PathVariable Long cardId, @Valid @RequestBody UpdateCardRequest request) {
+        Deck deck = deckRepository.findById(deckId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Deck not found"));
+
+        Card card = cardRepository.findByIdAndDeckId(cardId, deckId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Card not found"));
+
+        List<Card> existingCards = cardRepository.findAllByDeckIdOrderByIdAsc(deckId).stream()
+                .filter(existingCard -> !existingCard.getId().equals(cardId))
+                .toList();
+        deckValidationService.validateCardAddition(deck, existingCards, request.name(), request.type(), request.quantity());
+
+        card.setName(request.name());
+        card.setManaValue(request.manaValue());
+        card.setType(request.type());
+        card.setColors(request.colors());
+        card.setQuantity(request.quantity());
+
+        Card saved = cardRepository.save(card);
+        return CardResponse.from(saved);
+    }
+
     @DeleteMapping("/{cardId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteCard(@PathVariable Long deckId, @PathVariable Long cardId) {
@@ -130,6 +154,15 @@ public class DeckCardController {
     }
 
     public record CreateCardRequest(
+            @NotBlank String name,
+            @NotNull @Min(0) Integer manaValue,
+            @NotBlank String type,
+            @NotBlank String colors,
+            @NotNull @Min(1) Integer quantity
+    ) {
+    }
+
+    public record UpdateCardRequest(
             @NotBlank String name,
             @NotNull @Min(0) Integer manaValue,
             @NotBlank String type,

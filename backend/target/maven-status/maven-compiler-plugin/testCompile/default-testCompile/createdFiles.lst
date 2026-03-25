@@ -1,3 +1,4 @@
 com\example\mtgdeckmanager\deck\DeckCardValidationControllerTest.class
-com\example\mtgdeckmanager\deck\DeckImportControllerTest.class
 com\example\mtgdeckmanager\deck\DeckCardControllerQueryTest.class
+com\example\mtgdeckmanager\deck\DeckImportControllerTest.class
+com\example\mtgdeckmanager\deck\DeckUpdateControllerTest.class

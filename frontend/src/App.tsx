@@ -1,75 +1,63 @@
 import { FormEvent, useEffect, useState } from "react";
+import AppHeader from "./components/AppHeader";
+import DeckSidebar from "./components/DeckSidebar";
+import DeckDetails from "./components/DeckDetails";
+import {
+  ApiClientError,
+  createCard,
+  createDeck,
+  deleteCard,
+  fetchDeck,
+  fetchDeckCards,
+  fetchDeckStats,
+  fetchDecks,
+  fetchHealth,
+  importDecklist,
+  updateCard,
+  updateDeck
+} from "./services/api";
+import { Card, CardFilters, Deck, DeckStats, ImportResult } from "./types/models";
 
-type Deck = {
-  id: number;
-  name: string;
-  format: string;
-  commander: string;
-  createdAt: string;
-};
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unknown error";
+}
 
-type Card = {
-  id: number;
-  name: string;
-  manaValue: number;
-  type: string;
-  colors: string;
-  quantity: number;
-};
-
-type DeckStats = {
-  totalCards: number;
-  byColor: Record<string, number>;
-  byType: Record<string, number>;
-  manaCurve: Record<string, number>;
-};
-
-type ImportResult = {
-  importedCount: number;
-  createdCards: Array<{ id: number; name: string; quantity: number }>;
-  errors: Array<{ line: number; message: string; rawLine: string }>;
-};
-
-type ApiErrorResponse = {
-  message?: string;
-  errors?: string[];
-};
-
-const API_BASE_URL = "http://localhost:8080/api";
-
-async function parseApiError(response: Response): Promise<{ message: string; errors: string[] }> {
-  const fallback = `Request failed with status ${response.status}`;
-
-  try {
-    const data = (await response.json()) as ApiErrorResponse;
-    return {
-      message: data.message ?? fallback,
-      errors: Array.isArray(data.errors) ? data.errors : []
-    };
-  } catch {
-    return { message: fallback, errors: [] };
-  }
+function getValidationErrors(error: unknown): string[] {
+  return error instanceof ApiClientError ? error.errors : [];
 }
 
 function App() {
   const [health, setHealth] = useState("");
   const [healthError, setHealthError] = useState("");
+  const [checkingHealth, setCheckingHealth] = useState(false);
 
   const [decks, setDecks] = useState<Deck[]>([]);
   const [decksError, setDecksError] = useState("");
+  const [loadingDecks, setLoadingDecks] = useState(false);
   const [selectedDeck, setSelectedDeck] = useState<Deck | null>(null);
 
   const [cards, setCards] = useState<Card[]>([]);
   const [cardsError, setCardsError] = useState("");
+  const [loadingCards, setLoadingCards] = useState(false);
 
   const [stats, setStats] = useState<DeckStats | null>(null);
   const [statsError, setStatsError] = useState("");
+  const [loadingStats, setLoadingStats] = useState(false);
+
+  const [notice, setNotice] = useState("");
 
   const [name, setName] = useState("");
   const [format, setFormat] = useState("");
   const [commander, setCommander] = useState("");
   const [createDeckError, setCreateDeckError] = useState("");
   const [savingDeck, setSavingDeck] = useState(false);
+
+  const [editingDeckName, setEditingDeckName] = useState("");
+  const [editingDeckFormat, setEditingDeckFormat] = useState("");
+  const [editingDeckCommander, setEditingDeckCommander] = useState("");
+  const [updateDeckError, setUpdateDeckError] = useState("");
+  const [updateDeckValidationErrors, setUpdateDeckValidationErrors] = useState<string[]>([]);
+  const [updatingDeck, setUpdatingDeck] = useState(false);
 
   const [cardName, setCardName] = useState("");
   const [cardManaValue, setCardManaValue] = useState(0);
@@ -79,6 +67,14 @@ function App() {
   const [cardError, setCardError] = useState("");
   const [cardValidationErrors, setCardValidationErrors] = useState<string[]>([]);
   const [savingCard, setSavingCard] = useState(false);
+
+  const [editingCardId, setEditingCardId] = useState<number | null>(null);
+  const [editingCardName, setEditingCardName] = useState("");
+  const [editingCardManaValue, setEditingCardManaValue] = useState(0);
+  const [editingCardType, setEditingCardType] = useState("");
+  const [editingCardColors, setEditingCardColors] = useState("");
+  const [editingCardQuantity, setEditingCardQuantity] = useState(1);
+  const [updatingCard, setUpdatingCard] = useState(false);
 
   const [cardSearch, setCardSearch] = useState("");
   const [cardTypeFilter, setCardTypeFilter] = useState("");
@@ -92,66 +88,51 @@ function App() {
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
 
   const loadDecks = async () => {
+    setLoadingDecks(true);
     setDecksError("");
+
     try {
-      const response = await fetch(`${API_BASE_URL}/decks`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const data = (await response.json()) as Deck[];
-      setDecks(data);
-    } catch (err) {
+      setDecks(await fetchDecks());
+    } catch (error) {
       setDecks([]);
-      setDecksError(err instanceof Error ? err.message : "Unknown error");
+      setDecksError(getErrorMessage(error));
+    } finally {
+      setLoadingDecks(false);
     }
   };
 
-  const loadDeckCards = async (deckId: number) => {
+  const loadDeckCards = async (deckId: number, overrides?: Partial<CardFilters>) => {
+    setLoadingCards(true);
     setCardsError("");
-    try {
-      const params = new URLSearchParams();
-      if (cardSearch.trim()) {
-        params.set("name", cardSearch.trim());
-      }
-      if (cardTypeFilter.trim()) {
-        params.set("type", cardTypeFilter.trim());
-      }
-      if (cardColorFilter.trim()) {
-        params.set("color", cardColorFilter.trim());
-      }
-      const [sortBy, direction] = cardSort.split(":");
-      if (sortBy) {
-        params.set("sortBy", sortBy);
-      }
-      if (direction) {
-        params.set("direction", direction);
-      }
 
-      const query = params.toString();
-      const response = await fetch(`${API_BASE_URL}/decks/${deckId}/cards${query ? `?${query}` : ""}`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const data = (await response.json()) as Card[];
-      setCards(data);
-    } catch (err) {
+    const filters: CardFilters = {
+      name: overrides?.name ?? cardSearch,
+      type: overrides?.type ?? cardTypeFilter,
+      color: overrides?.color ?? cardColorFilter,
+      sort: overrides?.sort ?? cardSort
+    };
+
+    try {
+      setCards(await fetchDeckCards(deckId, filters));
+    } catch (error) {
       setCards([]);
-      setCardsError(err instanceof Error ? err.message : "Unknown error");
+      setCardsError(getErrorMessage(error));
+    } finally {
+      setLoadingCards(false);
     }
   };
 
   const loadDeckStats = async (deckId: number) => {
+    setLoadingStats(true);
     setStatsError("");
+
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${deckId}/stats`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const data = (await response.json()) as DeckStats;
-      setStats(data);
-    } catch (err) {
+      setStats(await fetchDeckStats(deckId));
+    } catch (error) {
       setStats(null);
-      setStatsError(err instanceof Error ? err.message : "Unknown error");
+      setStatsError(getErrorMessage(error));
+    } finally {
+      setLoadingStats(false);
     }
   };
 
@@ -162,67 +143,91 @@ function App() {
   const checkHealth = async () => {
     setHealth("");
     setHealthError("");
+    setCheckingHealth(true);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/health`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      setHealth(await response.text());
-    } catch (err) {
-      setHealthError(err instanceof Error ? err.message : "Unknown error");
+      setHealth(await fetchHealth());
+    } catch (error) {
+      setHealthError(getErrorMessage(error));
+    } finally {
+      setCheckingHealth(false);
     }
   };
 
   const onCreateDeck = async (event: FormEvent) => {
     event.preventDefault();
+    setNotice("");
     setCreateDeckError("");
     setSavingDeck(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ name, format, commander })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      const createdDeck = (await response.json()) as Deck;
+      const createdDeck = await createDeck({ name, format, commander });
       setName("");
       setFormat("");
       setCommander("");
       await loadDecks();
       setSelectedDeck(createdDeck);
+      setEditingDeckName(createdDeck.name);
+      setEditingDeckFormat(createdDeck.format);
+      setEditingDeckCommander(createdDeck.commander);
       setCards([]);
       setStats(null);
       setImportResult(null);
-      await loadDeckCards(createdDeck.id);
-      await loadDeckStats(createdDeck.id);
-    } catch (err) {
-      setCreateDeckError(err instanceof Error ? err.message : "Unknown error");
+      await Promise.all([loadDeckCards(createdDeck.id), loadDeckStats(createdDeck.id)]);
+      setNotice("Deck created.");
+    } catch (error) {
+      setCreateDeckError(getErrorMessage(error));
     } finally {
       setSavingDeck(false);
     }
   };
 
   const onSelectDeck = async (id: number) => {
+    setNotice("");
+
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${id}`);
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-      const deck = (await response.json()) as Deck;
+      const deck = await fetchDeck(id);
       setSelectedDeck(deck);
+      setEditingDeckName(deck.name);
+      setEditingDeckFormat(deck.format);
+      setEditingDeckCommander(deck.commander);
+      setUpdateDeckError("");
+      setUpdateDeckValidationErrors([]);
       setImportResult(null);
       setImportValidationErrors([]);
-      await loadDeckCards(deck.id);
-      await loadDeckStats(deck.id);
-    } catch (err) {
-      setCreateDeckError(err instanceof Error ? err.message : "Unknown error");
+      setEditingCardId(null);
+      await Promise.all([loadDeckCards(deck.id), loadDeckStats(deck.id)]);
+    } catch (error) {
+      setCreateDeckError(getErrorMessage(error));
+    }
+  };
+
+  const onUpdateDeck = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedDeck) {
+      return;
+    }
+
+    setNotice("");
+    setUpdateDeckError("");
+    setUpdateDeckValidationErrors([]);
+    setUpdatingDeck(true);
+
+    try {
+      const updated = await updateDeck(selectedDeck.id, {
+        name: editingDeckName,
+        format: editingDeckFormat,
+        commander: editingDeckCommander
+      });
+
+      setSelectedDeck(updated);
+      await Promise.all([loadDecks(), loadDeckStats(updated.id)]);
+      setNotice("Deck updated.");
+    } catch (error) {
+      setUpdateDeckError(getErrorMessage(error));
+      setUpdateDeckValidationErrors(getValidationErrors(error));
+    } finally {
+      setUpdatingDeck(false);
     }
   };
 
@@ -231,6 +236,7 @@ function App() {
     if (!selectedDeck) {
       return;
     }
+
     await loadDeckCards(selectedDeck.id);
   };
 
@@ -244,14 +250,12 @@ function App() {
       return;
     }
 
-    const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/cards?sortBy=name&direction=asc`);
-    if (!response.ok) {
-      setCards([]);
-      setCardsError(`Request failed with status ${response.status}`);
-      return;
-    }
-    const data = (await response.json()) as Card[];
-    setCards(data);
+    await loadDeckCards(selectedDeck.id, {
+      name: "",
+      type: "",
+      color: "",
+      sort: "name:asc"
+    });
   };
 
   const onAddCard = async (event: FormEvent) => {
@@ -260,66 +264,106 @@ function App() {
       return;
     }
 
+    setNotice("");
     setCardError("");
     setCardValidationErrors([]);
     setSavingCard(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/cards`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          name: cardName,
-          manaValue: cardManaValue,
-          type: cardType,
-          colors: cardColors,
-          quantity: cardQuantity
-        })
+      await createCard(selectedDeck.id, {
+        name: cardName,
+        manaValue: cardManaValue,
+        type: cardType,
+        colors: cardColors,
+        quantity: cardQuantity
       });
-
-      if (!response.ok) {
-        const errorResponse = await parseApiError(response);
-        setCardError(errorResponse.message);
-        setCardValidationErrors(errorResponse.errors);
-        return;
-      }
 
       setCardName("");
       setCardManaValue(0);
       setCardType("");
       setCardColors("");
       setCardQuantity(1);
-      await loadDeckCards(selectedDeck.id);
-      await loadDeckStats(selectedDeck.id);
-    } catch (err) {
-      setCardError(err instanceof Error ? err.message : "Unknown error");
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
+      setNotice("Card added.");
+    } catch (error) {
+      setCardError(getErrorMessage(error));
+      setCardValidationErrors(getValidationErrors(error));
     } finally {
       setSavingCard(false);
     }
   };
 
-  const onDeleteCard = async (cardId: number) => {
+  const startEditingCard = (card: Card) => {
+    setEditingCardId(card.id);
+    setEditingCardName(card.name);
+    setEditingCardManaValue(card.manaValue);
+    setEditingCardType(card.type);
+    setEditingCardColors(card.colors);
+    setEditingCardQuantity(card.quantity);
+    setCardError("");
+    setCardValidationErrors([]);
+  };
+
+  const cancelEditingCard = () => {
+    setEditingCardId(null);
+    setEditingCardName("");
+    setEditingCardManaValue(0);
+    setEditingCardType("");
+    setEditingCardColors("");
+    setEditingCardQuantity(1);
+  };
+
+  const onUpdateCard = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!selectedDeck || editingCardId === null) {
+      return;
+    }
+
+    setNotice("");
+    setCardError("");
+    setCardValidationErrors([]);
+    setUpdatingCard(true);
+
+    try {
+      await updateCard(selectedDeck.id, editingCardId, {
+        name: editingCardName,
+        manaValue: editingCardManaValue,
+        type: editingCardType,
+        colors: editingCardColors,
+        quantity: editingCardQuantity
+      });
+
+      cancelEditingCard();
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
+      setNotice("Card updated.");
+    } catch (error) {
+      setCardError(getErrorMessage(error));
+      setCardValidationErrors(getValidationErrors(error));
+    } finally {
+      setUpdatingCard(false);
+    }
+  };
+
+  const onDeleteCard = async (cardId: number, cardDisplayName: string) => {
     if (!selectedDeck) {
       return;
     }
 
+    const confirmed = window.confirm(`Remove ${cardDisplayName} from this deck?`);
+    if (!confirmed) {
+      return;
+    }
+
+    setNotice("");
     setCardError("");
     setCardValidationErrors([]);
+
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/cards/${cardId}`, {
-        method: "DELETE"
-      });
-
-      if (!response.ok) {
-        throw new Error(`Request failed with status ${response.status}`);
-      }
-
-      await loadDeckCards(selectedDeck.id);
-      await loadDeckStats(selectedDeck.id);
-    } catch (err) {
-      setCardError(err instanceof Error ? err.message : "Unknown error");
+      await deleteCard(selectedDeck.id, cardId);
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
+      setNotice("Card removed.");
+    } catch (error) {
+      setCardError(getErrorMessage(error));
     }
   };
 
@@ -329,267 +373,121 @@ function App() {
       return;
     }
 
+    setNotice("");
     setImportError("");
     setImportValidationErrors([]);
     setImportingDecklist(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/decks/${selectedDeck.id}/import`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ decklistText })
-      });
-
-      if (!response.ok) {
-        const errorResponse = await parseApiError(response);
-        setImportResult(null);
-        setImportError(errorResponse.message);
-        setImportValidationErrors(errorResponse.errors);
-        return;
-      }
-
-      const result = (await response.json()) as ImportResult;
+      const result = await importDecklist(selectedDeck.id, decklistText);
       setImportResult(result);
-      await loadDeckCards(selectedDeck.id);
-      await loadDeckStats(selectedDeck.id);
-    } catch (err) {
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
+      setNotice("Decklist imported.");
+    } catch (error) {
       setImportResult(null);
-      setImportError(err instanceof Error ? err.message : "Unknown error");
+      setImportError(getErrorMessage(error));
+      setImportValidationErrors(getValidationErrors(error));
     } finally {
       setImportingDecklist(false);
     }
   };
 
   return (
-    <main className="container">
-      <h1>MTG Deck Manager</h1>
+    <main className="app">
+      <AppHeader
+        checkingHealth={checkingHealth}
+        health={health}
+        healthError={healthError}
+        onCheckHealth={() => void checkHealth()}
+      />
 
-      <section className="panel">
-        <h2>Backend Health</h2>
-        <button onClick={checkHealth}>Check Backend Health</button>
-        {health && <p>Response: {health}</p>}
-        {healthError && <p className="error">Error: {healthError}</p>}
-      </section>
+      {notice && <div className="notice success">{notice}</div>}
 
-      <section className="panel">
-        <h2>Create Deck</h2>
-        <form onSubmit={onCreateDeck} className="form">
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder="Deck name"
-            required
-          />
-          <input
-            value={format}
-            onChange={(event) => setFormat(event.target.value)}
-            placeholder="Format (e.g. Commander)"
-            required
-          />
-          <input
-            value={commander}
-            onChange={(event) => setCommander(event.target.value)}
-            placeholder="Commander"
-            required
-          />
-          <button type="submit" disabled={savingDeck}>
-            {savingDeck ? "Saving..." : "Create Deck"}
-          </button>
-        </form>
-        {createDeckError && <p className="error">Error: {createDeckError}</p>}
-      </section>
+      <div className="layout">
+        <DeckSidebar
+          name={name}
+          format={format}
+          commander={commander}
+          savingDeck={savingDeck}
+          createDeckError={createDeckError}
+          loadingDecks={loadingDecks}
+          decks={decks}
+          decksError={decksError}
+          selectedDeckId={selectedDeck?.id ?? null}
+          onNameChange={setName}
+          onFormatChange={setFormat}
+          onCommanderChange={setCommander}
+          onCreateDeck={(event) => void onCreateDeck(event)}
+          onSelectDeck={(deckId) => void onSelectDeck(deckId)}
+        />
 
-      <section className="panel">
-        <h2>Decks</h2>
-        {decksError && <p className="error">Error: {decksError}</p>}
-        {decks.length === 0 ? (
-          <p>No decks yet.</p>
-        ) : (
-          <ul className="deck-list">
-            {decks.map((deck) => (
-              <li key={deck.id}>
-                <button className="link-button" onClick={() => void onSelectDeck(deck.id)}>
-                  {deck.name} ({deck.format})
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="panel">
-        <h2>Selected Deck</h2>
-        {!selectedDeck ? (
-          <p>Select a deck to view details.</p>
-        ) : (
-          <>
-            <div>
-              <p><strong>Name:</strong> {selectedDeck.name}</p>
-              <p><strong>Format:</strong> {selectedDeck.format}</p>
-              <p><strong>Commander:</strong> {selectedDeck.commander}</p>
-              <p><strong>Created:</strong> {new Date(selectedDeck.createdAt).toLocaleString()}</p>
-            </div>
-
-            <h3>Decklist Import</h3>
-            <form onSubmit={onImportDecklist} className="form">
-              <textarea
-                value={decklistText}
-                onChange={(event) => setDecklistText(event.target.value)}
-                placeholder={"4 Lightning Bolt\n2 Counterspell\n1 Sol Ring"}
-                rows={6}
-                required
-              />
-              <button type="submit" disabled={importingDecklist}>
-                {importingDecklist ? "Importing..." : "Import Decklist"}
-              </button>
-            </form>
-            {importError && <p className="error">Error: {importError}</p>}
-            {importValidationErrors.length > 0 && (
-              <ul className="deck-list error">
-                {importValidationErrors.map((error, index) => (
-                  <li key={`import-validation-${index}`}>{error}</li>
-                ))}
-              </ul>
-            )}
-            {importResult && (
-              <div>
-                <p><strong>Imported count:</strong> {importResult.importedCount}</p>
-                <p><strong>Created cards:</strong></p>
-                {importResult.createdCards.length === 0 ? (
-                  <p>None</p>
-                ) : (
-                  <ul className="deck-list">
-                    {importResult.createdCards.map((card) => (
-                      <li key={card.id}>{card.quantity}x {card.name}</li>
-                    ))}
-                  </ul>
-                )}
-                <p><strong>Errors:</strong></p>
-                {importResult.errors.length === 0 ? (
-                  <p>None</p>
-                ) : (
-                  <ul className="deck-list">
-                    {importResult.errors.map((error, index) => (
-                      <li key={`${error.line}-${index}`}>
-                        Line {error.line}: {error.message} ({error.rawLine || "empty"})
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            <h3>Deck Stats</h3>
-            {statsError && <p className="error">Error: {statsError}</p>}
-            {!stats ? (
-              <p>No stats available.</p>
-            ) : (
-              <>
-                <p><strong>Total cards:</strong> {stats.totalCards}</p>
-                <p><strong>By color:</strong> {Object.entries(stats.byColor).map(([k, v]) => `${k}: ${v}`).join(", ") || "-"}</p>
-                <p><strong>By type:</strong> {Object.entries(stats.byType).map(([k, v]) => `${k}: ${v}`).join(", ") || "-"}</p>
-                <p><strong>Mana curve:</strong> {Object.entries(stats.manaCurve).map(([k, v]) => `MV ${k}: ${v}`).join(", ") || "-"}</p>
-              </>
-            )}
-
-            <h3>Cards</h3>
-            <form onSubmit={onApplyCardFilters} className="form">
-              <input
-                value={cardSearch}
-                onChange={(event) => setCardSearch(event.target.value)}
-                placeholder="Search by card name"
-              />
-              <input
-                value={cardTypeFilter}
-                onChange={(event) => setCardTypeFilter(event.target.value)}
-                placeholder="Filter by type (exact)"
-              />
-              <input
-                value={cardColorFilter}
-                onChange={(event) => setCardColorFilter(event.target.value)}
-                placeholder="Filter by color (exact, e.g. R)"
-              />
-              <select value={cardSort} onChange={(event) => setCardSort(event.target.value)}>
-                <option value="name:asc">Sort: Name (A-Z)</option>
-                <option value="name:desc">Sort: Name (Z-A)</option>
-                <option value="manaValue:asc">Sort: Mana Value (Low-High)</option>
-                <option value="manaValue:desc">Sort: Mana Value (High-Low)</option>
-              </select>
-              <div>
-                <button type="submit">Apply Filters</button>
-                <button type="button" className="small-button" onClick={() => void onResetCardFilters()}>
-                  Reset
-                </button>
-              </div>
-            </form>
-
-            <form onSubmit={onAddCard} className="form">
-              <input
-                value={cardName}
-                onChange={(event) => setCardName(event.target.value)}
-                placeholder="Card name"
-                required
-              />
-              <input
-                type="number"
-                value={cardManaValue}
-                onChange={(event) => setCardManaValue(Number(event.target.value))}
-                min={0}
-                required
-              />
-              <input
-                value={cardType}
-                onChange={(event) => setCardType(event.target.value)}
-                placeholder="Type (e.g. Creature)"
-                required
-              />
-              <input
-                value={cardColors}
-                onChange={(event) => setCardColors(event.target.value)}
-                placeholder="Colors (e.g. W,U)"
-                required
-              />
-              <input
-                type="number"
-                value={cardQuantity}
-                onChange={(event) => setCardQuantity(Number(event.target.value))}
-                min={1}
-                required
-              />
-              <button type="submit" disabled={savingCard}>
-                {savingCard ? "Adding..." : "Add Card"}
-              </button>
-            </form>
-
-            {cardError && <p className="error">Error: {cardError}</p>}
-            {cardValidationErrors.length > 0 && (
-              <ul className="deck-list error">
-                {cardValidationErrors.map((error, index) => (
-                  <li key={`card-validation-${index}`}>{error}</li>
-                ))}
-              </ul>
-            )}
-            {cardsError && <p className="error">Error: {cardsError}</p>}
-
-            {cards.length === 0 ? (
-              <p>No cards found.</p>
-            ) : (
-              <ul className="deck-list">
-                {cards.map((card) => (
-                  <li key={card.id}>
-                    {card.quantity}x {card.name} (MV {card.manaValue}, {card.type}, {card.colors})
-                    <button className="small-button" onClick={() => void onDeleteCard(card.id)}>
-                      Remove
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </>
-        )}
-      </section>
+        <DeckDetails
+          selectedDeck={selectedDeck}
+          editingDeckName={editingDeckName}
+          editingDeckFormat={editingDeckFormat}
+          editingDeckCommander={editingDeckCommander}
+          updatingDeck={updatingDeck}
+          updateDeckError={updateDeckError}
+          updateDeckValidationErrors={updateDeckValidationErrors}
+          onEditingDeckNameChange={setEditingDeckName}
+          onEditingDeckFormatChange={setEditingDeckFormat}
+          onEditingDeckCommanderChange={setEditingDeckCommander}
+          onUpdateDeck={(event) => void onUpdateDeck(event)}
+          loadingStats={loadingStats}
+          statsError={statsError}
+          stats={stats}
+          decklistText={decklistText}
+          importingDecklist={importingDecklist}
+          importError={importError}
+          importValidationErrors={importValidationErrors}
+          importResult={importResult}
+          onDecklistTextChange={setDecklistText}
+          onImportDecklist={(event) => void onImportDecklist(event)}
+          cardSearch={cardSearch}
+          cardTypeFilter={cardTypeFilter}
+          cardColorFilter={cardColorFilter}
+          cardSort={cardSort}
+          onCardSearchChange={setCardSearch}
+          onCardTypeFilterChange={setCardTypeFilter}
+          onCardColorFilterChange={setCardColorFilter}
+          onCardSortChange={setCardSort}
+          onApplyCardFilters={(event) => void onApplyCardFilters(event)}
+          onResetCardFilters={() => void onResetCardFilters()}
+          cardName={cardName}
+          cardManaValue={cardManaValue}
+          cardType={cardType}
+          cardColors={cardColors}
+          cardQuantity={cardQuantity}
+          savingCard={savingCard}
+          cardError={cardError}
+          cardValidationErrors={cardValidationErrors}
+          onCardNameChange={setCardName}
+          onCardManaValueChange={setCardManaValue}
+          onCardTypeChange={setCardType}
+          onCardColorsChange={setCardColors}
+          onCardQuantityChange={setCardQuantity}
+          onAddCard={(event) => void onAddCard(event)}
+          editingCardId={editingCardId}
+          editingCardName={editingCardName}
+          editingCardManaValue={editingCardManaValue}
+          editingCardType={editingCardType}
+          editingCardColors={editingCardColors}
+          editingCardQuantity={editingCardQuantity}
+          updatingCard={updatingCard}
+          onEditingCardNameChange={setEditingCardName}
+          onEditingCardManaValueChange={setEditingCardManaValue}
+          onEditingCardTypeChange={setEditingCardType}
+          onEditingCardColorsChange={setEditingCardColors}
+          onEditingCardQuantityChange={setEditingCardQuantity}
+          onUpdateCard={(event) => void onUpdateCard(event)}
+          onCancelEditingCard={cancelEditingCard}
+          cardsError={cardsError}
+          loadingCards={loadingCards}
+          cards={cards}
+          onStartEditingCard={startEditingCard}
+          onDeleteCard={(cardId, cardDisplayName) => void onDeleteCard(cardId, cardDisplayName)}
+        />
+      </div>
     </main>
   );
 }

@@ -17,7 +17,9 @@ com\example\mtgdeckmanager\deck\DeckCardController$CreateCardRequest.class
 com\example\mtgdeckmanager\deck\DeckStatsController.class
 com\example\mtgdeckmanager\deck\DeckValidationException.class
 com\example\mtgdeckmanager\deck\DeckCardController$CardResponse.class
+com\example\mtgdeckmanager\deck\DeckCardController$UpdateCardRequest.class
 com\example\mtgdeckmanager\config\ApiExceptionHandler.class
+com\example\mtgdeckmanager\deck\DeckController$UpdateDeckRequest.class
 com\example\mtgdeckmanager\deck\DeckImportController$ImportResultResponse.class
 com\example\mtgdeckmanager\deck\DeckImportController$ImportRequest.class
 com\example\mtgdeckmanager\deck\DeckController$DeckResponse.class

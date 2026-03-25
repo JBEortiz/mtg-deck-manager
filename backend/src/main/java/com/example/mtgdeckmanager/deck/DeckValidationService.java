@@ -27,6 +27,10 @@ public class DeckValidationService {
         validateCommanderRules(deck, existingCards, importedCards);
     }
 
+    public void validateDeckState(Deck deck, List<Card> existingCards) {
+        validateCommanderRules(deck, existingCards, List.of());
+    }
+
     private void validateCommanderRules(Deck deck, List<Card> existingCards, List<CandidateCard> toAdd) {
         if (!"commander".equalsIgnoreCase(safe(deck.getFormat()))) {
             return;
