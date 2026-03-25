@@ -1,0 +1,75 @@
+:root {
+  font-family: Arial, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+  background: #f7f7f7;
+}
+
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  display: grid;
+  gap: 1rem;
+}
+
+.panel {
+  background: white;
+  padding: 1rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+h1,
+h2,
+h3 {
+  margin-top: 0;
+}
+
+.form {
+  display: grid;
+  gap: 0.5rem;
+}
+
+input,
+button {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #999;
+  border-radius: 6px;
+  font: inherit;
+}
+
+button {
+  background: #111;
+  color: white;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.link-button {
+  background: transparent;
+  color: #0a56c2;
+  border: none;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.small-button {
+  margin-left: 0.5rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.deck-list {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.error {
+  color: #b00020;
+}
