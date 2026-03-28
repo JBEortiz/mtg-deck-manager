@@ -1,5 +1,7 @@
 package com.example.mtgdeckmanager.cardlookup;
 
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,15 +29,39 @@ public class CardLookupController {
 
     @GetMapping("/card")
     public CardLookupResponse getCardByName(@RequestParam @NotBlank String name) {
-        CardLookupResult card = cardLookupClient.getCardByExactName(name.trim());
-        return new CardLookupResponse(card.name(), card.manaValue(), card.type(), card.colors());
+        return toResponse(cardLookupClient.getCardByExactName(name.trim()));
+    }
+
+    @GetMapping("/search")
+    public List<CardLookupResponse> searchCards(
+            @RequestParam @NotBlank String query,
+            @RequestParam(defaultValue = "8") @Min(1) @Max(20) Integer limit
+    ) {
+        return cardLookupClient.searchCards(query.trim(), limit).stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    private CardLookupResponse toResponse(CardLookupResult card) {
+        return new CardLookupResponse(
+                card.name(),
+                card.manaValue(),
+                card.type(),
+                card.colors(),
+                card.scryfallId(),
+                card.imageSmall(),
+                card.imageNormal()
+        );
     }
 
     public record CardLookupResponse(
             String name,
             Integer manaValue,
             String type,
-            String colors
+            String colors,
+            String scryfallId,
+            String imageSmall,
+            String imageNormal
     ) {
     }
 }

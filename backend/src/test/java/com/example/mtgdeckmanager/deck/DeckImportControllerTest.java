@@ -12,6 +12,7 @@ import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -24,6 +25,9 @@ class DeckImportControllerTest {
 
     @Autowired
     private DeckRepository deckRepository;
+
+    @Autowired
+    private CardRepository cardRepository;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -53,20 +57,57 @@ class DeckImportControllerTest {
     }
 
     @Test
-    void rejectsImportWhenCommanderRulesAreViolated() throws Exception {
+    void allowsImportWithDuplicateNonBasicCards() throws Exception {
         Deck deck = new Deck();
-        deck.setName("Invalid Commander Import");
+        deck.setName("Flexible Commander Import");
         deck.setFormat("Commander");
         deck.setCommander("Mizzix");
         Deck savedDeck = deckRepository.save(deck);
 
-        String decklist = "1 Mizzix\n2 Counterspell";
+        String decklist = "1 Mizzix\n2 Counterspell\n1 Lightning Bolt";
         String payload = objectMapper.writeValueAsString(Map.of("decklistText", decklist));
 
         mockMvc.perform(post("/api/decks/{id}/import", savedDeck.getId())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors.length()").value(1));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.importedCount").value(4));
+    }
+
+    @Test
+    void exportsDecklistAsPlainText() throws Exception {
+        Deck deck = new Deck();
+        deck.setName("Export Deck");
+        deck.setFormat("Commander");
+        deck.setCommander("Mizzix");
+        Deck savedDeck = deckRepository.save(deck);
+
+        createCard(savedDeck, "Sol Ring", 1);
+        createCard(savedDeck, "Counterspell", 2);
+
+        mockMvc.perform(get("/api/decks/{id}/export", savedDeck.getId()))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_PLAIN))
+                .andExpect(content().string("1 Sol Ring\n2 Counterspell"));
+    }
+
+    @Test
+    void returnsNotFoundWhenExportingMissingDeck() throws Exception {
+        mockMvc.perform(get("/api/decks/{id}/export", 999999))
+                .andExpect(status().isNotFound());
+    }
+
+    private Card createCard(Deck deck, String name, int quantity) {
+        Card card = new Card();
+        card.setDeck(deck);
+        card.setName(name);
+        card.setManaValue(0);
+        card.setType("Unknown");
+        card.setColors("Colorless");
+        card.setQuantity(quantity);
+        return cardRepository.save(card);
     }
 }
+
+
+

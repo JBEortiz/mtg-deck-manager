@@ -9,5 +9,7 @@ public interface CardRepository extends JpaRepository<Card, Long> {
 
     List<Card> findAllByDeckIdOrderByIdAsc(Long deckId);
 
+    List<Card> findAllByDeckIdInOrderByDeckIdAscIdAsc(List<Long> deckIds);
+
     Optional<Card> findByIdAndDeckId(Long id, Long deckId);
 }

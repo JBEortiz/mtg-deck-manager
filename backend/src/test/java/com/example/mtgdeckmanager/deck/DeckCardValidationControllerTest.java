@@ -11,7 +11,6 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.util.Map;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest
@@ -31,7 +30,7 @@ class DeckCardValidationControllerTest {
     private ObjectMapper objectMapper;
 
     @Test
-    void rejectsNonBasicWithQuantityAboveOne() throws Exception {
+    void allowsNonBasicWithQuantityAboveOne() throws Exception {
         Deck deck = new Deck();
         deck.setName("Validation Deck");
         deck.setFormat("Commander");
@@ -51,8 +50,7 @@ class DeckCardValidationControllerTest {
         mockMvc.perform(post("/api/decks/{id}/cards", savedDeck.getId())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(payload))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.errors.length()").value(1));
+                .andExpect(status().isCreated());
     }
 
     @Test

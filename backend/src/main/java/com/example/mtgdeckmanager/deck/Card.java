@@ -37,6 +37,18 @@ public class Card {
     @Column(nullable = false)
     private Integer quantity;
 
+    @Column
+    private String imageUrl;
+
+    @Column
+    private String scryfallId;
+
+    @Column
+    private String imageSmall;
+
+    @Column
+    private String imageNormal;
+
     public Long getId() {
         return id;
     }
@@ -87,5 +99,37 @@ public class Card {
 
     public void setQuantity(Integer quantity) {
         this.quantity = quantity;
+    }
+
+    public String getImageUrl() {
+        return imageUrl;
+    }
+
+    public void setImageUrl(String imageUrl) {
+        this.imageUrl = imageUrl;
+    }
+
+    public String getScryfallId() {
+        return scryfallId;
+    }
+
+    public void setScryfallId(String scryfallId) {
+        this.scryfallId = scryfallId;
+    }
+
+    public String getImageSmall() {
+        return imageSmall;
+    }
+
+    public void setImageSmall(String imageSmall) {
+        this.imageSmall = imageSmall;
+    }
+
+    public String getImageNormal() {
+        return imageNormal;
+    }
+
+    public void setImageNormal(String imageNormal) {
+        this.imageNormal = imageNormal;
     }
 }

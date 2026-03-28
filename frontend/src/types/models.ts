@@ -1,9 +1,12 @@
-export type Deck = {
+﻿export type Deck = {
   id: number;
   name: string;
   format: string;
   commander: string;
   createdAt: string;
+  totalCardCount?: number;
+  cardPreview?: string[];
+  deckCoverUrl?: string | null;
 };
 
 export type Card = {
@@ -13,6 +16,10 @@ export type Card = {
   type: string;
   colors: string;
   quantity: number;
+  scryfallId?: string | null;
+  imageSmall?: string | null;
+  imageNormal?: string | null;
+  imageUrl?: string | null;
 };
 
 export type DeckStats = {
@@ -45,4 +52,7 @@ export type CardLookupResult = {
   manaValue: number;
   type: string;
   colors: string;
+  scryfallId?: string | null;
+  imageSmall?: string | null;
+  imageNormal?: string | null;
 };

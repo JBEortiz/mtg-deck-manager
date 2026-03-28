@@ -3,6 +3,9 @@ package com.example.mtgdeckmanager.deck;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/decks")
@@ -29,6 +33,22 @@ public class DeckImportController {
         this.deckRepository = deckRepository;
         this.cardRepository = cardRepository;
         this.deckValidationService = deckValidationService;
+    }
+
+    @GetMapping("/{id}/export")
+    public ResponseEntity<String> exportDecklist(@PathVariable Long id) {
+        if (!deckRepository.existsById(id)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Deck not found");
+        }
+
+        List<Card> cards = cardRepository.findAllByDeckIdOrderByIdAsc(id);
+        String decklist = cards.stream()
+                .map(card -> card.getQuantity() + " " + card.getName())
+                .collect(Collectors.joining("\n"));
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_PLAIN)
+                .body(decklist);
     }
 
     @PostMapping("/{id}/import")

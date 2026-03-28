@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import AppHeader from "./components/AppHeader";
 import DeckSidebar from "./components/DeckSidebar";
 import DeckDetails from "./components/DeckDetails";
+import RulesAssistant from "./components/RulesAssistant";
 import {
   ApiClientError,
   createCard,
@@ -15,6 +16,7 @@ import {
   fetchScryfallAutocomplete,
   fetchScryfallCardByName,
   importDecklist,
+  fetchDecklistExport,
   updateCard,
   updateDeck
 } from "./services/api";
@@ -26,6 +28,14 @@ function getErrorMessage(error: unknown): string {
 
 function getValidationErrors(error: unknown): string[] {
   return error instanceof ApiClientError ? error.errors : [];
+}
+function firstNonBlank(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function App() {
@@ -73,6 +83,9 @@ function App() {
   const [cardType, setCardType] = useState("");
   const [cardColors, setCardColors] = useState("");
   const [cardQuantity, setCardQuantity] = useState(1);
+  const [cardScryfallId, setCardScryfallId] = useState("");
+  const [cardImageSmall, setCardImageSmall] = useState("");
+  const [cardImageNormal, setCardImageNormal] = useState("");
   const [cardError, setCardError] = useState("");
   const [cardValidationErrors, setCardValidationErrors] = useState<string[]>([]);
   const [savingCard, setSavingCard] = useState(false);
@@ -83,6 +96,9 @@ function App() {
   const [editingCardType, setEditingCardType] = useState("");
   const [editingCardColors, setEditingCardColors] = useState("");
   const [editingCardQuantity, setEditingCardQuantity] = useState(1);
+  const [editingCardScryfallId, setEditingCardScryfallId] = useState("");
+  const [editingCardImageSmall, setEditingCardImageSmall] = useState("");
+  const [editingCardImageNormal, setEditingCardImageNormal] = useState("");
   const [updatingCard, setUpdatingCard] = useState(false);
 
   const [cardSearch, setCardSearch] = useState("");
@@ -95,6 +111,11 @@ function App() {
   const [importError, setImportError] = useState("");
   const [importValidationErrors, setImportValidationErrors] = useState<string[]>([]);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [decklistExporting, setDecklistExporting] = useState(false);
+  const [decklistExportError, setDecklistExportError] = useState("");
+
+  const [quickAddingSuggestion, setQuickAddingSuggestion] = useState("");
+  const [quantityUpdatingCardId, setQuantityUpdatingCardId] = useState<number | null>(null);
 
   const loadDecks = async () => {
     setLoadingDecks(true);
@@ -236,6 +257,7 @@ function App() {
       setUpdateDeckValidationErrors([]);
       setImportResult(null);
       setImportValidationErrors([]);
+      setDecklistExportError("");
       setEditingCardId(null);
       await Promise.all([loadDeckCards(deck.id), loadDeckStats(deck.id)]);
     } catch (error) {
@@ -272,29 +294,33 @@ function App() {
     }
   };
 
+  const getCardLookupDetails = async (name: string): Promise<CardLookupResult> => {
+    const key = name.trim().toLowerCase();
+    const cached = cardDetailsCacheRef.current.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const card = await fetchScryfallCardByName(name);
+    cardDetailsCacheRef.current.set(key, card);
+    return card;
+  };
+
   const onSelectSuggestion = async (name: string) => {
     setCardLookupError("");
     setCardLookupQuery(name);
     setCardSuggestions([]);
 
-    const cached = cardDetailsCacheRef.current.get(name.toLowerCase());
-    if (cached) {
-      setCardName(cached.name);
-      setCardManaValue(cached.manaValue);
-      setCardType(cached.type);
-      setCardColors(cached.colors);
-      setNotice(`Loaded ${cached.name} into the form.`);
-      return;
-    }
-
     setCardLookupLoading(true);
     try {
-      const card = await fetchScryfallCardByName(name);
-      cardDetailsCacheRef.current.set(name.toLowerCase(), card);
+      const card = await getCardLookupDetails(name);
       setCardName(card.name);
       setCardManaValue(card.manaValue);
       setCardType(card.type);
       setCardColors(card.colors);
+      setCardScryfallId(card.scryfallId ?? "");
+      setCardImageSmall(card.imageSmall ?? "");
+      setCardImageNormal(card.imageNormal ?? "");
       setNotice(`Loaded ${card.name} into the form.`);
     } catch (error) {
       setCardLookupError(getErrorMessage(error));
@@ -303,6 +329,40 @@ function App() {
     }
   };
 
+  const onQuickAddSuggestion = async (name: string) => {
+    if (!selectedDeck) {
+      return;
+    }
+
+    setNotice("");
+    setCardError("");
+    setCardValidationErrors([]);
+    setCardLookupError("");
+    setQuickAddingSuggestion(name);
+
+    try {
+      const card = await getCardLookupDetails(name);
+      await createCard(selectedDeck.id, {
+        name: card.name,
+        manaValue: card.manaValue,
+        type: card.type,
+        colors: card.colors,
+        quantity: 1,
+        scryfallId: card.scryfallId ?? null,
+        imageSmall: card.imageSmall ?? null,
+        imageNormal: card.imageNormal ?? null,
+        imageUrl: card.imageNormal ?? card.imageSmall ?? null
+      });
+
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      setNotice(`Added 1x ${card.name}.`);
+    } catch (error) {
+      setCardError(getErrorMessage(error));
+      setCardValidationErrors(getValidationErrors(error));
+    } finally {
+      setQuickAddingSuggestion("");
+    }
+  };
   const onApplyCardFilters = async (event: FormEvent) => {
     event.preventDefault();
     if (!selectedDeck) {
@@ -347,7 +407,11 @@ function App() {
         manaValue: cardManaValue,
         type: cardType,
         colors: cardColors,
-        quantity: cardQuantity
+        quantity: cardQuantity,
+        scryfallId: cardScryfallId || null,
+        imageSmall: cardImageSmall || null,
+        imageNormal: cardImageNormal || null,
+        imageUrl: cardImageNormal || cardImageSmall || null
       });
 
       setCardName("");
@@ -355,10 +419,13 @@ function App() {
       setCardType("");
       setCardColors("");
       setCardQuantity(1);
+      setCardScryfallId("");
+      setCardImageSmall("");
+      setCardImageNormal("");
       setCardLookupQuery("");
       setCardSuggestions([]);
-      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
-      setNotice("Card added.");
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      setNotice(`Added ${cardQuantity}x ${cardName}.`);
     } catch (error) {
       setCardError(getErrorMessage(error));
       setCardValidationErrors(getValidationErrors(error));
@@ -374,6 +441,9 @@ function App() {
     setEditingCardType(card.type);
     setEditingCardColors(card.colors);
     setEditingCardQuantity(card.quantity);
+    setEditingCardScryfallId(card.scryfallId ?? "");
+    setEditingCardImageSmall(card.imageSmall ?? "");
+    setEditingCardImageNormal(card.imageNormal ?? card.imageUrl ?? "");
     setCardError("");
     setCardValidationErrors([]);
   };
@@ -385,6 +455,9 @@ function App() {
     setEditingCardType("");
     setEditingCardColors("");
     setEditingCardQuantity(1);
+    setEditingCardScryfallId("");
+    setEditingCardImageSmall("");
+    setEditingCardImageNormal("");
   };
 
   const onUpdateCard = async (event: FormEvent) => {
@@ -404,12 +477,16 @@ function App() {
         manaValue: editingCardManaValue,
         type: editingCardType,
         colors: editingCardColors,
-        quantity: editingCardQuantity
+        quantity: editingCardQuantity,
+        scryfallId: editingCardScryfallId || null,
+        imageSmall: editingCardImageSmall || null,
+        imageNormal: editingCardImageNormal || null,
+        imageUrl: editingCardImageNormal || editingCardImageSmall || null
       });
 
       cancelEditingCard();
-      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
-      setNotice("Card updated.");
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      setNotice(`Updated ${editingCardName}.`);
     } catch (error) {
       setCardError(getErrorMessage(error));
       setCardValidationErrors(getValidationErrors(error));
@@ -418,6 +495,50 @@ function App() {
     }
   };
 
+  const updateCardQuantity = async (card: Card, nextQuantity: number) => {
+    if (!selectedDeck || nextQuantity < 1) {
+      return;
+    }
+
+    setNotice("");
+    setCardError("");
+    setCardValidationErrors([]);
+    setQuantityUpdatingCardId(card.id);
+
+    try {
+      await updateCard(selectedDeck.id, card.id, {
+        name: card.name,
+        manaValue: card.manaValue,
+        type: card.type,
+        colors: card.colors,
+        quantity: nextQuantity,
+        scryfallId: card.scryfallId ?? null,
+        imageSmall: card.imageSmall ?? null,
+        imageNormal: card.imageNormal ?? null,
+        imageUrl: card.imageNormal ?? card.imageSmall ?? card.imageUrl ?? null
+      });
+
+      if (editingCardId === card.id) {
+        setEditingCardQuantity(nextQuantity);
+      }
+
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      setNotice(`Updated ${card.name} quantity to ${nextQuantity}.`);
+    } catch (error) {
+      setCardError(getErrorMessage(error));
+      setCardValidationErrors(getValidationErrors(error));
+    } finally {
+      setQuantityUpdatingCardId(null);
+    }
+  };
+
+  const onDecreaseCardQuantity = async (card: Card) => {
+    await updateCardQuantity(card, card.quantity - 1);
+  };
+
+  const onIncreaseCardQuantity = async (card: Card) => {
+    await updateCardQuantity(card, card.quantity + 1);
+  };
   const onDeleteCard = async (cardId: number, cardDisplayName: string) => {
     if (!selectedDeck) {
       return;
@@ -434,8 +555,8 @@ function App() {
 
     try {
       await deleteCard(selectedDeck.id, cardId);
-      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
-      setNotice("Card removed.");
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      setNotice(`Removed ${cardDisplayName}.`);
     } catch (error) {
       setCardError(getErrorMessage(error));
     }
@@ -451,12 +572,14 @@ function App() {
     setImportError("");
     setImportValidationErrors([]);
     setImportingDecklist(true);
+    setDecklistExportError("");
 
     try {
       const result = await importDecklist(selectedDeck.id, decklistText);
       setImportResult(result);
-      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id)]);
-      setNotice("Decklist imported.");
+      await Promise.all([loadDeckCards(selectedDeck.id), loadDeckStats(selectedDeck.id), loadDecks()]);
+      const issueText = result.errors.length > 0 ? ` with ${result.errors.length} line issues` : "";
+      setNotice(`Imported ${result.importedCount} cards (${result.createdCards.length} entries)${issueText}.`);
     } catch (error) {
       setImportResult(null);
       setImportError(getErrorMessage(error));
@@ -465,6 +588,116 @@ function App() {
       setImportingDecklist(false);
     }
   };
+
+  const copyTextFallback = (text: string): boolean => {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "absolute";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+
+    document.body.removeChild(area);
+    return copied;
+  };
+
+  const getDecklistExportText = async (): Promise<string | null> => {
+    if (!selectedDeck) {
+      return null;
+    }
+
+    setDecklistExportError("");
+    setDecklistExporting(true);
+    try {
+      return await fetchDecklistExport(selectedDeck.id);
+    } catch (error) {
+      setDecklistExportError(getErrorMessage(error));
+      return null;
+    } finally {
+      setDecklistExporting(false);
+    }
+  };
+
+  const onCopyDecklist = async () => {
+    const text = await getDecklistExportText();
+    if (text === null) {
+      return;
+    }
+
+    let copied = false;
+    try {
+      if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } else {
+        copied = copyTextFallback(text);
+      }
+    } catch {
+      copied = copyTextFallback(text);
+    }
+
+    if (copied) {
+      setNotice("Decklist copied to clipboard.");
+    } else {
+      setDecklistExportError("Could not copy decklist. You can use Download Export instead.");
+    }
+  };
+
+  const onDownloadDecklist = async () => {
+    const text = await getDecklistExportText();
+    if (text === null || !selectedDeck) {
+      return;
+    }
+
+    const safeName = selectedDeck.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+    const filename = `${safeName || "deck"}-decklist.txt`;
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    setNotice(`Decklist downloaded as ${filename}.`);
+  };
+  const selectedDeckCoverUrl = (() => {
+    if (!selectedDeck) {
+      return null;
+    }
+
+    const explicitCover = firstNonBlank(selectedDeck.deckCoverUrl);
+    if (explicitCover) {
+      return explicitCover;
+    }
+
+    const commanderName = selectedDeck.commander?.trim().toLowerCase() ?? "";
+    if (commanderName) {
+      const commanderCard = cards.find((card) => card.name.trim().toLowerCase() === commanderName);
+      const commanderCover = commanderCard ? firstNonBlank(commanderCard.imageNormal, commanderCard.imageSmall, commanderCard.imageUrl) : null;
+      if (commanderCover) {
+        return commanderCover;
+      }
+    }
+
+    for (const card of cards) {
+      const cardCover = firstNonBlank(card.imageNormal, card.imageSmall, card.imageUrl);
+      if (cardCover) {
+        return cardCover;
+      }
+    }
+
+    return null;
+  })();
 
   return (
     <main className="app">
@@ -497,6 +730,7 @@ function App() {
 
         <DeckDetails
           selectedDeck={selectedDeck}
+          selectedDeckCoverUrl={selectedDeckCoverUrl}
           editingDeckName={editingDeckName}
           editingDeckFormat={editingDeckFormat}
           editingDeckCommander={editingDeckCommander}
@@ -515,8 +749,13 @@ function App() {
           importError={importError}
           importValidationErrors={importValidationErrors}
           importResult={importResult}
+          decklistExporting={decklistExporting}
+          decklistExportError={decklistExportError}
           onDecklistTextChange={setDecklistText}
           onImportDecklist={(event) => void onImportDecklist(event)}
+          onClearDecklistText={() => setDecklistText("")}
+          onCopyDecklist={() => void onCopyDecklist()}
+          onDownloadDecklist={() => void onDownloadDecklist()}
           cardSearch={cardSearch}
           cardTypeFilter={cardTypeFilter}
           cardColorFilter={cardColorFilter}
@@ -531,8 +770,10 @@ function App() {
           cardSuggestions={cardSuggestions}
           cardLookupLoading={cardLookupLoading}
           cardLookupError={cardLookupError}
+          quickAddingSuggestion={quickAddingSuggestion}
           onCardLookupQueryChange={setCardLookupQuery}
-          onSelectSuggestion={(name) => void onSelectSuggestion(name)}
+          onSelectSuggestion={(suggestionName) => void onSelectSuggestion(suggestionName)}
+          onQuickAddSuggestion={(suggestionName) => void onQuickAddSuggestion(suggestionName)}
           cardName={cardName}
           cardManaValue={cardManaValue}
           cardType={cardType}
@@ -554,6 +795,7 @@ function App() {
           editingCardColors={editingCardColors}
           editingCardQuantity={editingCardQuantity}
           updatingCard={updatingCard}
+          quantityUpdatingCardId={quantityUpdatingCardId}
           onEditingCardNameChange={setEditingCardName}
           onEditingCardManaValueChange={setEditingCardManaValue}
           onEditingCardTypeChange={setEditingCardType}
@@ -566,10 +808,35 @@ function App() {
           cards={cards}
           onStartEditingCard={startEditingCard}
           onDeleteCard={(cardId, cardDisplayName) => void onDeleteCard(cardId, cardDisplayName)}
+          onDecreaseCardQuantity={(card) => void onDecreaseCardQuantity(card)}
+          onIncreaseCardQuantity={(card) => void onIncreaseCardQuantity(card)}
         />
       </div>
+
+      <RulesAssistant />
     </main>
   );
 }
 
 export default App;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

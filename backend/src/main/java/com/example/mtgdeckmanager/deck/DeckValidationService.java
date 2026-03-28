@@ -3,11 +3,8 @@ package com.example.mtgdeckmanager.deck;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -37,57 +34,19 @@ public class DeckValidationService {
         }
 
         List<String> errors = new ArrayList<>();
-        Map<String, Integer> quantityByName = new HashMap<>();
-        Map<String, String> typeByName = new HashMap<>();
 
         int totalCards = 0;
         for (Card card : existingCards) {
-            String normalizedName = normalize(card.getName());
-            if (normalizedName.isEmpty()) {
-                continue;
-            }
-
             int quantity = card.getQuantity() == null ? 0 : card.getQuantity();
             totalCards += quantity;
-            quantityByName.merge(normalizedName, quantity, Integer::sum);
-            typeByName.putIfAbsent(normalizedName, safe(card.getType()));
         }
 
         for (CandidateCard card : toAdd) {
-            String normalizedName = normalize(card.name());
-            if (normalizedName.isEmpty()) {
-                continue;
-            }
-
-            int quantity = card.quantity();
-            totalCards += quantity;
-            quantityByName.merge(normalizedName, quantity, Integer::sum);
-            typeByName.putIfAbsent(normalizedName, safe(card.type()));
+            totalCards += Math.max(0, card.quantity());
         }
 
         if (totalCards > 100) {
             errors.add("Commander decks cannot exceed 100 total cards.");
-        }
-
-        String commanderName = normalize(deck.getCommander());
-        int commanderCount = quantityByName.getOrDefault(commanderName, 0);
-        if (commanderCount != 1) {
-            errors.add("Commander decks must include exactly 1 copy of the commander card: " + safe(deck.getCommander()) + ".");
-        }
-
-        Set<String> repeatedNonBasic = new HashSet<>();
-        for (Map.Entry<String, Integer> entry : quantityByName.entrySet()) {
-            String cardName = entry.getKey();
-            int quantity = entry.getValue();
-            String cardType = typeByName.getOrDefault(cardName, "");
-
-            if (quantity > 1 && !isBasicLand(cardName, cardType)) {
-                repeatedNonBasic.add(cardName);
-            }
-        }
-
-        for (String cardName : repeatedNonBasic) {
-            errors.add("Non-basic cards cannot exceed quantity 1: " + cardName + ".");
         }
 
         if (!errors.isEmpty()) {

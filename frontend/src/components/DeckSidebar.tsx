@@ -1,4 +1,4 @@
-import { FormEvent } from "react";
+﻿import { FormEvent } from "react";
 import { Deck } from "../types/models";
 
 type DeckSidebarProps = {
@@ -40,21 +40,28 @@ function DeckSidebar(props: DeckSidebarProps) {
     <aside className="panel sidebar">
       <h2>Decks</h2>
 
-      <form onSubmit={onCreateDeck} className="form compact">
-        <label className="field">
-          <span>Name</span>
-          <input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="Deck name" required />
-        </label>
-        <label className="field">
-          <span>Format</span>
-          <input value={format} onChange={(event) => onFormatChange(event.target.value)} placeholder="Commander" required />
-        </label>
-        <label className="field">
-          <span>Commander</span>
-          <input value={commander} onChange={(event) => onCommanderChange(event.target.value)} placeholder="Mizzix" required />
-        </label>
-        <button className="btn" type="submit" disabled={savingDeck}>{savingDeck ? "Creating..." : "Create Deck"}</button>
-      </form>
+      <details className="mobile-section mobile-section-create" open>
+        <summary>
+          <h3>Create Deck</h3>
+        </summary>
+        <div className="mobile-section-content">
+          <form onSubmit={onCreateDeck} className="form compact">
+            <label className="field">
+              <span>Name</span>
+              <input value={name} onChange={(event) => onNameChange(event.target.value)} placeholder="Deck name" required />
+            </label>
+            <label className="field">
+              <span>Format</span>
+              <input value={format} onChange={(event) => onFormatChange(event.target.value)} placeholder="Commander" required />
+            </label>
+            <label className="field">
+              <span>Commander</span>
+              <input value={commander} onChange={(event) => onCommanderChange(event.target.value)} placeholder="Mizzix" />
+            </label>
+            <button className="btn" type="submit" disabled={savingDeck}>{savingDeck ? "Creating..." : "Create Deck"}</button>
+          </form>
+        </div>
+      </details>
       {createDeckError && <p className="error">{createDeckError}</p>}
 
       {loadingDecks ? (
@@ -69,8 +76,21 @@ function DeckSidebar(props: DeckSidebarProps) {
                 className={`deck-menu-item${selectedDeckId === deck.id ? " active" : ""}`}
                 onClick={() => onSelectDeck(deck.id)}
               >
+                <div className="deck-cover-wrap">
+                  {deck.deckCoverUrl ? (
+                    <img className="deck-cover-image" src={deck.deckCoverUrl} alt={`${deck.name} cover`} loading="lazy" />
+                  ) : (
+                    <div className="deck-cover-placeholder">No Image</div>
+                  )}
+                </div>
                 <strong>{deck.name}</strong>
-                <span>{deck.format}</span>
+                <span className="deck-menu-meta">{deck.format} | {deck.commander || "No commander"}</span>
+                <span className="deck-menu-count">Cards: {deck.totalCardCount ?? 0}</span>
+                {deck.cardPreview && deck.cardPreview.length > 0 ? (
+                  <span className="deck-menu-preview">{deck.cardPreview.join(" • ")}</span>
+                ) : (
+                  <span className="deck-menu-preview muted">No cards yet.</span>
+                )}
               </button>
             </li>
           ))}

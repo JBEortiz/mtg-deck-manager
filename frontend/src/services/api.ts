@@ -132,7 +132,10 @@ export async function fetchScryfallCardByName(name: string): Promise<CardLookupR
   return response.json();
 }
 
-export async function createCard(deckId: number, payload: { name: string; manaValue: number; type: string; colors: string; quantity: number }): Promise<Card> {
+export async function createCard(
+  deckId: number,
+  payload: { name: string; manaValue: number; type: string; colors: string; quantity: number; scryfallId?: string | null; imageSmall?: string | null; imageNormal?: string | null; imageUrl?: string | null }
+): Promise<Card> {
   const response = await fetch(`${API_BASE_URL}/decks/${deckId}/cards`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -145,7 +148,11 @@ export async function createCard(deckId: number, payload: { name: string; manaVa
   return response.json();
 }
 
-export async function updateCard(deckId: number, cardId: number, payload: { name: string; manaValue: number; type: string; colors: string; quantity: number }): Promise<Card> {
+export async function updateCard(
+  deckId: number,
+  cardId: number,
+  payload: { name: string; manaValue: number; type: string; colors: string; quantity: number; scryfallId?: string | null; imageSmall?: string | null; imageNormal?: string | null; imageUrl?: string | null }
+): Promise<Card> {
   const response = await fetch(`${API_BASE_URL}/decks/${deckId}/cards/${cardId}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -175,6 +182,23 @@ export async function importDecklist(deckId: number, decklistText: string): Prom
     body: JSON.stringify({ decklistText })
   });
 
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.json();
+}
+
+export async function fetchDecklistExport(deckId: number): Promise<string> {
+  const response = await fetch(`${API_BASE_URL}/decks/${deckId}/export`);
+  if (!response.ok) {
+    throw await parseError(response);
+  }
+  return response.text();
+}
+
+export async function fetchScryfallSearch(query: string, limit = 8): Promise<CardLookupResult[]> {
+  const params = new URLSearchParams({ query, limit: String(limit) });
+  const response = await fetch(`${API_BASE_URL}/scryfall/search?${params.toString()}`);
   if (!response.ok) {
     throw await parseError(response);
   }

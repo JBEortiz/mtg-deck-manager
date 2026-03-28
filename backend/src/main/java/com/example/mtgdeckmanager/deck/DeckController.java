@@ -14,11 +14,17 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/decks")
 public class DeckController {
+
+    private static final int PREVIEW_LIMIT = 5;
 
     private final DeckRepository deckRepository;
     private final CardRepository cardRepository;
@@ -31,9 +37,22 @@ public class DeckController {
     }
 
     @GetMapping
-    public List<DeckResponse> listDecks() {
-        return deckRepository.findAllByOrderByCreatedAtDesc().stream()
-                .map(DeckResponse::from)
+    public List<DeckListResponse> listDecks() {
+        List<Deck> decks = deckRepository.findAllByOrderByCreatedAtDesc();
+        if (decks.isEmpty()) {
+            return List.of();
+        }
+
+        List<Long> deckIds = decks.stream().map(Deck::getId).toList();
+        Map<Long, List<Card>> cardsByDeckId = cardRepository.findAllByDeckIdInOrderByDeckIdAscIdAsc(deckIds).stream()
+                .collect(Collectors.groupingBy(card -> card.getDeck().getId()));
+
+        return decks.stream()
+                .map(deck -> {
+                    List<Card> deckCards = cardsByDeckId.getOrDefault(deck.getId(), List.of());
+                    String coverUrl = resolveDeckCoverUrl(deck, deckCards);
+                    return DeckListResponse.from(deck, deckCards, coverUrl);
+                })
                 .toList();
     }
 
@@ -46,14 +65,16 @@ public class DeckController {
         deck.setCommander(request.commander());
 
         Deck saved = deckRepository.save(deck);
-        return DeckResponse.from(saved);
+        return DeckResponse.from(saved, null);
     }
 
     @GetMapping("/{id}")
     public DeckResponse getDeck(@PathVariable Long id) {
         Deck deck = deckRepository.findById(id)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Deck not found"));
-        return DeckResponse.from(deck);
+
+        List<Card> cards = cardRepository.findAllByDeckIdOrderByIdAsc(id);
+        return DeckResponse.from(deck, resolveDeckCoverUrl(deck, cards));
     }
 
     @PutMapping("/{id}")
@@ -69,21 +90,90 @@ public class DeckController {
         deckValidationService.validateDeckState(deck, cards);
 
         Deck saved = deckRepository.save(deck);
-        return DeckResponse.from(saved);
+        return DeckResponse.from(saved, resolveDeckCoverUrl(saved, cards));
+    }
+
+    private String resolveDeckCoverUrl(Deck deck, List<Card> cards) {
+        String commanderName = normalize(deck.getCommander());
+
+        if (!commanderName.isBlank()) {
+            for (Card card : cards) {
+                if (commanderName.equals(normalize(card.getName())) && hasText(resolveCardCover(card))) {
+                    return resolveCardCover(card);
+                }
+            }
+        }
+
+        for (Card card : cards) {
+            if (hasText(resolveCardCover(card))) {
+                return resolveCardCover(card);
+            }
+        }
+
+        return null;
+    }
+
+    private String resolveCardCover(Card card) {
+        if (hasText(card.getImageNormal())) {
+            return card.getImageNormal();
+        }
+        if (hasText(card.getImageSmall())) {
+            return card.getImageSmall();
+        }
+        return card.getImageUrl();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     public record CreateDeckRequest(
             @NotBlank String name,
             @NotBlank String format,
-            @NotBlank String commander
+            String commander
     ) {
     }
 
     public record UpdateDeckRequest(
             @NotBlank String name,
             @NotBlank String format,
-            @NotBlank String commander
+            String commander
     ) {
+    }
+
+    public record DeckListResponse(
+            Long id,
+            String name,
+            String format,
+            String commander,
+            Instant createdAt,
+            int totalCardCount,
+            List<String> cardPreview,
+            String deckCoverUrl
+    ) {
+        static DeckListResponse from(Deck deck, List<Card> cards, String coverUrl) {
+            List<Card> cardList = cards == null ? Collections.emptyList() : cards;
+            int total = cardList.stream().mapToInt(Card::getQuantity).sum();
+            List<String> preview = cardList.stream()
+                    .limit(PREVIEW_LIMIT)
+                    .map(card -> card.getQuantity() + "x " + card.getName())
+                    .toList();
+
+            return new DeckListResponse(
+                    deck.getId(),
+                    deck.getName(),
+                    deck.getFormat(),
+                    deck.getCommander(),
+                    deck.getCreatedAt(),
+                    total,
+                    preview,
+                    coverUrl
+            );
+        }
     }
 
     public record DeckResponse(
@@ -91,15 +181,17 @@ public class DeckController {
             String name,
             String format,
             String commander,
-            Instant createdAt
+            Instant createdAt,
+            String deckCoverUrl
     ) {
-        static DeckResponse from(Deck deck) {
+        static DeckResponse from(Deck deck, String coverUrl) {
             return new DeckResponse(
                     deck.getId(),
                     deck.getName(),
                     deck.getFormat(),
                     deck.getCommander(),
-                    deck.getCreatedAt()
+                    deck.getCreatedAt(),
+                    coverUrl
             );
         }
     }

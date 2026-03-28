@@ -1,0 +1,24 @@
+CREATE TABLE decks (
+    id BIGSERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    format VARCHAR(255) NOT NULL,
+    commander VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE TABLE cards (
+    id BIGSERIAL PRIMARY KEY,
+    deck_id BIGINT NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    mana_value INTEGER NOT NULL,
+    card_type VARCHAR(255) NOT NULL,
+    colors VARCHAR(255) NOT NULL,
+    quantity INTEGER NOT NULL,
+    image_url VARCHAR(1024),
+    scryfall_id VARCHAR(255),
+    image_small VARCHAR(1024),
+    image_normal VARCHAR(1024),
+    CONSTRAINT fk_cards_deck FOREIGN KEY (deck_id) REFERENCES decks (id)
+);
+
+CREATE INDEX idx_cards_deck_id ON cards (deck_id);

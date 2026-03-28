@@ -2,4 +2,5 @@ C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\c
 C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\deck\DeckCardControllerQueryTest.java
 C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\deck\DeckCardValidationControllerTest.java
 C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\deck\DeckImportControllerTest.java
+C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\deck\DeckListControllerTest.java
 C:\workspace\mtg-deck-manager\backend\src\test\java\com\example\mtgdeckmanager\deck\DeckUpdateControllerTest.java

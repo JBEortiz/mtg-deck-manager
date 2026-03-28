@@ -117,6 +117,10 @@ public class DeckCardController {
         card.setType(request.type());
         card.setColors(request.colors());
         card.setQuantity(request.quantity());
+        card.setScryfallId(normalizeNullable(request.scryfallId()));
+        card.setImageSmall(normalizeNullable(request.imageSmall()));
+        card.setImageNormal(normalizeNullable(request.imageNormal()));
+        card.setImageUrl(resolveImageUrl(request.imageNormal(), request.imageSmall(), request.imageUrl()));
 
         Card saved = cardRepository.save(card);
         return CardResponse.from(saved);
@@ -140,9 +144,36 @@ public class DeckCardController {
         card.setType(request.type());
         card.setColors(request.colors());
         card.setQuantity(request.quantity());
+        card.setScryfallId(normalizeNullable(request.scryfallId()));
+        card.setImageSmall(normalizeNullable(request.imageSmall()));
+        card.setImageNormal(normalizeNullable(request.imageNormal()));
+        card.setImageUrl(resolveImageUrl(request.imageNormal(), request.imageSmall(), request.imageUrl()));
 
         Card saved = cardRepository.save(card);
         return CardResponse.from(saved);
+    }
+
+    private String resolveImageUrl(String imageNormal, String imageSmall, String fallback) {
+        String normalizedNormal = normalizeNullable(imageNormal);
+        if (normalizedNormal != null) {
+            return normalizedNormal;
+        }
+
+        String normalizedSmall = normalizeNullable(imageSmall);
+        if (normalizedSmall != null) {
+            return normalizedSmall;
+        }
+
+        return normalizeNullable(fallback);
+    }
+
+    private String normalizeNullable(String value) {
+        if (value == null) {
+            return null;
+        }
+
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
     }
 
     @DeleteMapping("/{cardId}")
@@ -158,7 +189,11 @@ public class DeckCardController {
             @NotNull @Min(0) Integer manaValue,
             @NotBlank String type,
             @NotBlank String colors,
-            @NotNull @Min(1) Integer quantity
+            @NotNull @Min(1) Integer quantity,
+            String scryfallId,
+            String imageSmall,
+            String imageNormal,
+            String imageUrl
     ) {
     }
 
@@ -167,7 +202,11 @@ public class DeckCardController {
             @NotNull @Min(0) Integer manaValue,
             @NotBlank String type,
             @NotBlank String colors,
-            @NotNull @Min(1) Integer quantity
+            @NotNull @Min(1) Integer quantity,
+            String scryfallId,
+            String imageSmall,
+            String imageNormal,
+            String imageUrl
     ) {
     }
 
@@ -177,7 +216,11 @@ public class DeckCardController {
             Integer manaValue,
             String type,
             String colors,
-            Integer quantity
+            Integer quantity,
+            String scryfallId,
+            String imageSmall,
+            String imageNormal,
+            String imageUrl
     ) {
         static CardResponse from(Card card) {
             return new CardResponse(
@@ -186,8 +229,13 @@ public class DeckCardController {
                     card.getManaValue(),
                     card.getType(),
                     card.getColors(),
-                    card.getQuantity()
+                    card.getQuantity(),
+                    card.getScryfallId(),
+                    card.getImageSmall(),
+                    card.getImageNormal(),
+                    card.getImageUrl()
             );
         }
     }
 }
+

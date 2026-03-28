@@ -37,7 +37,7 @@ class CardLookupControllerTest {
     @Test
     void returnsCardDetailsByExactName() throws Exception {
         when(cardLookupClient.getCardByExactName("Lightning Bolt"))
-                .thenReturn(new CardLookupResult("Lightning Bolt", 1, "Instant", "R"));
+                .thenReturn(new CardLookupResult("Lightning Bolt", 1, "Instant", "R", "abc123", "https://thumb", "https://img"));
 
         mockMvc.perform(get("/api/scryfall/card").queryParam("name", "Lightning Bolt"))
                 .andExpect(status().isOk())
