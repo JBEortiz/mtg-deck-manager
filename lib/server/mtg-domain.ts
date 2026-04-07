@@ -3,12 +3,12 @@ import "server-only";
 import { countPendingMetadataCards, findReusableMetadata, mergeReusableMetadata, needsMetadataEnrichment, resolveMetadataLookup, selectMetadataEnrichmentCandidates } from "@/lib/card-metadata";
 import { inferCommanderFromResolvedEntries, parseDecklistText } from "@/lib/decklist-import";
 import { resolveImportEntriesWithFallback } from "@/lib/import-resolution";
-import type { Card, CardLookupResult, Deck, DeckPortfolio, DeckStats, DeckValueTracker, ImportResult } from "@/lib/types";
-import { buildDeckPassport, buildMulliganSample } from "@/lib/server/mtg-analytics";
+import type { Card, CardLookupResult, Deck, DeckBudgetUpgradeSuggestion, DeckBudgetUpgrades, DeckCutSuggestion, DeckCutSuggestions, DeckPortfolio, DeckStats, DeckValueTracker, ImportResult } from "@/lib/types";
+import { buildDeckPassport, buildMulliganSample, classifyDeckCardRoles } from "@/lib/server/mtg-analytics";
 import { ensureDeckValueTracker, ensurePortfolioValueTracker, initializeDeckValueTracking, refreshDeckValueSnapshotsInDatabase } from "@/lib/server/deck-value";
 import { createOwnedDeckRecord, ensureOwnedResource, filterOwnedResources, notFoundForOwnership, requireAuthenticatedOwner } from "@/lib/server/deck-ownership";
 import { readDatabase, type StoredCard, type StoredDeck, withDatabaseWrite } from "@/lib/server/mtg-store";
-import { getCardByExactName, getCardByFuzzyName, searchCards as searchScryfallCards } from "@/lib/scryfall/server";
+import { getCardByExactName, getCardByFuzzyName, getCardPricesByCollection, searchCards as searchScryfallCards } from "@/lib/scryfall/server";
 
 export type ApiRouteError = {
   body: Record<string, unknown>;
@@ -102,6 +102,296 @@ function deckCards(cards: StoredCard[], deckId: number) {
 
 function hasColor(colors: string, expectedColor: string) {
   return splitColors(colors).some((part) => part.toLowerCase() === expectedColor.trim().toLowerCase());
+}
+
+function isLandCard(card: { type: string }) {
+  return normalize(card.type).includes("land");
+}
+
+function isCreatureCard(card: { type: string }) {
+  return normalize(card.type).includes("creature");
+}
+
+function commanderColorSet(cards: StoredCard[], commanderName: string) {
+  const commander = cards.find((card) => normalize(card.name) === normalize(commanderName));
+  return new Set(splitColors(commander?.colors).map((color) => color.toUpperCase()));
+}
+
+function overlapCount(values: Set<string>, candidate: string[]) {
+  return candidate.reduce((count, color) => count + (values.has(color.toUpperCase()) ? 1 : 0), 0);
+}
+
+function buildCutSuggestionSummary(deck: StoredDeck, suggestions: DeckCutSuggestion[], warnings: string[]) {
+  if (suggestions.length === 0) {
+    return deck.commander
+      ? `No hay un primer corte claro para ${deck.commander} con las heuristicas MVP actuales.`
+      : "No hay un primer corte claro con las heuristicas MVP actuales.";
+  }
+
+  const topCategories = new Set(suggestions.slice(0, 3).map((suggestion) => suggestion.category));
+  const themes: string[] = [];
+  if (topCategories.has("curve-pressure") || topCategories.has("too-slow")) {
+    themes.push("la curva alta");
+  }
+  if (topCategories.has("redundant-effect")) {
+    themes.push("efectos redundantes");
+  }
+  if (topCategories.has("win-more")) {
+    themes.push("cartas de cierre que sobran");
+  }
+  if (topCategories.has("low-synergy")) {
+    themes.push("piezas poco alineadas con el plan");
+  }
+  if (topCategories.has("low-impact") || topCategories.has("weak-standalone-value")) {
+    themes.push("slots de impacto bajo");
+  }
+
+  const summaryTheme = themes.length > 0 ? themes.join(", ") : "las piezas menos eficientes";
+  const warningSuffix = warnings.length > 0 ? " La confianza baja un poco porque el deck sigue incompleto o con datos limitados." : "";
+  return `Los primeros cortes apuntan sobre todo a ${summaryTheme}, empezando por las cartas que presionan mas la consistencia del plan.${warningSuffix}`;
+}
+
+function buildDeckCutSuggestions(deck: StoredDeck, cards: StoredCard[]): DeckCutSuggestions {
+  const warnings: string[] = [];
+  const totalCards = cards.reduce((total, card) => total + quantity(card), 0);
+  if (cards.length < 20 || totalCards < 60) {
+    warnings.push("El deck parece incompleto; los cortes tienen menos contexto del normal.");
+  }
+
+  const passport = buildDeckPassport(deck, cards);
+  const commanderColors = commanderColorSet(cards, deck.commander);
+  const nonLands = cards.filter((card) => !isLandCard(card));
+  const highCurveCount = nonLands.filter((card) => card.manaValue >= 5).reduce((sum, card) => sum + quantity(card), 0);
+  const heavyCurve = nonLands.length > 0 && highCurveCount >= Math.max(12, Math.floor(totalCards * 0.18));
+  const suggestions = nonLands
+    .map((card) => {
+      const roles = classifyDeckCardRoles(card);
+      const colors = splitColors(card.colors).map((color) => color.toUpperCase());
+      const colorOverlap = commanderColors.size > 0 ? overlapCount(commanderColors, colors) : colors.length;
+      let score = 0;
+      let category: DeckCutSuggestion["category"] = "low-impact";
+      let reason = "No empuja con suficiente fuerza el plan principal comparado con otras cartas del deck.";
+
+      if (card.manaValue >= 7) {
+        score += 6;
+        category = "too-slow";
+        reason = `Cuesta ${card.manaValue} mana y pide demasiado tiempo antes de impactar la partida.`;
+      } else if (card.manaValue >= 5 && heavyCurve) {
+        score += 4;
+        category = "curve-pressure";
+        reason = `La curva ya va cargada arriba y esta pieza de coste ${card.manaValue} aprieta mas los turnos medios.`;
+      }
+
+      if ((roles.finisher && passport.roles.finishers >= 5 && card.manaValue >= 5)) {
+        score += 4;
+        category = "win-more";
+        reason = "El deck ya tiene suficientes cierres; esta carta parece mas un lujo que una necesidad.";
+      } else if ((roles.ramp && passport.roles.ramp >= 11 && card.manaValue >= 3)) {
+        score += 4;
+        category = "redundant-effect";
+        reason = "Ya vas sobrado de ramp y este slot es de los menos eficientes para esa funcion.";
+      } else if ((roles.draw && passport.roles.draw >= 10 && card.manaValue >= 4)) {
+        score += 4;
+        category = "redundant-effect";
+        reason = "El deck ya tiene bastante robo; esta pieza es de las primeras en sobrar.";
+      } else if (((roles.removal || roles.boardWipe) && (passport.roles.removal + passport.roles.boardWipes) >= 11 && card.manaValue >= 4)) {
+        score += 4;
+        category = "redundant-effect";
+        reason = "La interaccion ya esta cubierta y esta respuesta es de las menos eficientes.";
+      } else if ((roles.protection && passport.roles.protection >= 5 && card.manaValue >= 3)) {
+        score += 3;
+        category = "redundant-effect";
+        reason = "Hay proteccion suficiente y esta copia adicional aporta menos que otros slots.";
+      }
+
+      if (!roles.ramp && !roles.draw && !roles.removal && !roles.boardWipe && !roles.protection && !roles.finisher) {
+        if (card.manaValue >= 4 && !isCreatureCard(card)) {
+          score += 3;
+          category = "weak-standalone-value";
+          reason = "No destaca por eficiencia ni por rol claro; es de los slots mas faciles de convertir en algo mejor.";
+        } else {
+          score += 2;
+          category = "low-impact";
+          reason = "Su impacto aislado parece bajo frente a otras cartas del mismo hueco.";
+        }
+      }
+
+      if (commanderColors.size > 0 && colors.length > 0 && colorOverlap === 0 && card.manaValue >= 3) {
+        score += 3;
+        category = "low-synergy";
+        reason = "Aporta poco a la identidad principal del comandante y compite por un slot que podria ser mas sinergico.";
+      }
+
+      if (card.quantity > 1 && card.manaValue >= 4) {
+        score += 1;
+      }
+
+      return {
+        cardId: card.id,
+        cardName: card.name,
+        quantity: card.quantity,
+        manaValue: card.manaValue,
+        category,
+        reason,
+        score
+      } satisfies DeckCutSuggestion;
+    })
+    .filter((suggestion) => suggestion.score > 0)
+    .sort((left, right) => right.score - left.score || right.manaValue - left.manaValue || left.cardName.localeCompare(right.cardName))
+    .slice(0, 10);
+
+  return {
+    deckId: deck.id,
+    commander: deck.commander,
+    generatedAt: new Date().toISOString(),
+    status: suggestions.length > 0 ? (warnings.length > 0 ? "partial" : "ready") : "unavailable",
+    summary: buildCutSuggestionSummary(deck, suggestions, warnings),
+    warnings,
+    suggestions
+  };
+}
+
+type UpgradeRole = "ramp" | "draw" | "removal" | "protection" | "consistency";
+
+type UpgradeCandidate = {
+  name: string;
+  roles: UpgradeRole[];
+  colors: string[];
+  minBudgetUsd?: number;
+  improves: string;
+  reasonTemplate: string;
+};
+
+const UPGRADE_CANDIDATES: UpgradeCandidate[] = [
+  { name: "Arcane Signet", roles: ["ramp", "consistency"], colors: [], improves: "Mejora el ramp temprano", reasonTemplate: "Es una mejora limpia de mana para casi cualquier deck de Commander y acelera el plan sin pedir condiciones." },
+  { name: "Fellwar Stone", roles: ["ramp", "consistency"], colors: [], improves: "Acelera sin perder flexibilidad", reasonTemplate: "Suele dar mana util en multiplayer y mejora el desarrollo sin subir mucho la curva." },
+  { name: "Liquimetal Torque", roles: ["ramp"], colors: [], improves: "Suma una roca eficiente de coste dos", reasonTemplate: "Aprieta mejor los primeros turnos que varias rocas de coste tres o mas." },
+  { name: "Thought Vessel", roles: ["ramp", "draw"], colors: [], improves: "Combina aceleracion y margen de mano", reasonTemplate: "Mejora la curva y da un extra util en partidas largas sin ocupar un slot caro." },
+  { name: "Wayfarer's Bauble", roles: ["ramp", "consistency"], colors: [], improves: "Hace mas estable el arranque", reasonTemplate: "Es una forma barata de estabilizar salidas lentas y arreglar turnos tempranos." },
+  { name: "Swiftfoot Boots", roles: ["protection", "consistency"], colors: [], improves: "Protege al comandante y a las mejores amenazas", reasonTemplate: "Da proteccion inmediata a piezas importantes y mejora la consistencia del plan central." },
+  { name: "Lightning Greaves", roles: ["protection", "consistency"], colors: [], minBudgetUsd: 4, improves: "Proteccion inmediata para el plan central", reasonTemplate: "Reduce el riesgo de perder tempo al desplegar comandante o payoff clave." },
+  { name: "Mind Stone", roles: ["ramp", "draw"], colors: [], improves: "Rampa temprano y se recicla luego", reasonTemplate: "Es una roca mas eficiente que muchos aceleradores lentos y mantiene valor en late game." },
+  { name: "Night's Whisper", roles: ["draw", "consistency"], colors: ["B"], improves: "Sube el robo eficiente", reasonTemplate: "Da cartas por poco mana y ayuda a que el deck no se vacie demasiado pronto." },
+  { name: "Sign in Blood", roles: ["draw"], colors: ["B"], improves: "Mejora la consistencia de robo", reasonTemplate: "Convierte dos mana en dos cartas y suele ser una mejora clara sobre slots negros flojos." },
+  { name: "Read the Bones", roles: ["draw"], colors: ["B"], improves: "Filtra y recupera gas", reasonTemplate: "Da seleccion mas cartas y compensa manos o robos mediocres." },
+  { name: "Ponder", roles: ["draw", "consistency"], colors: ["U"], improves: "Aumenta la consistencia", reasonTemplate: "Mejora mucho la calidad de los primeros robos y ayuda a encadenar mejores turnos." },
+  { name: "Preordain", roles: ["draw", "consistency"], colors: ["U"], improves: "Ajusta draws y curva", reasonTemplate: "Su eficiencia hace que los turnos tempranos sean mas fluidos y consistentes." },
+  { name: "Arcane Denial", roles: ["removal", "consistency"], colors: ["U"], improves: "Anade interaccion barata", reasonTemplate: "Da una respuesta flexible a bajo coste y mejora la capacidad de no quedarse vendido." },
+  { name: "Pongify", roles: ["removal"], colors: ["U"], improves: "Sube la calidad del removal", reasonTemplate: "Convierte un slot de respuesta mediocre en una interaccion mucho mas eficiente." },
+  { name: "Rapid Hybridization", roles: ["removal"], colors: ["U"], improves: "Interaccion mas eficiente", reasonTemplate: "Gana tempo frente a amenazas grandes y abarata el paquete de respuestas." },
+  { name: "Swords to Plowshares", roles: ["removal"], colors: ["W"], improves: "Removal premium de coste uno", reasonTemplate: "Es una mejora muy clara de eficiencia para cualquier paquete blanco de respuestas." },
+  { name: "Path to Exile", roles: ["removal"], colors: ["W"], improves: "Respuesta barata y fiable", reasonTemplate: "Aprieta mejor el coste de interaccion que muchas alternativas mas lentas." },
+  { name: "Generous Gift", roles: ["removal"], colors: ["W"], improves: "Respuesta universal", reasonTemplate: "Amplia mucho el rango de permanentes que el deck puede contestar." },
+  { name: "Nature's Lore", roles: ["ramp", "consistency"], colors: ["G"], improves: "Rampa de tierras mas limpia", reasonTemplate: "Mejora la base de mana y suele superar a varios aceleradores mas lentos." },
+  { name: "Farseek", roles: ["ramp", "consistency"], colors: ["G"], improves: "Arregla mana y curva", reasonTemplate: "Hace mas estables los colores y reduce salidas torpes." },
+  { name: "Rampant Growth", roles: ["ramp"], colors: ["G"], improves: "Acelera la salida", reasonTemplate: "Convierte un turno dos en un desarrollo mucho mas fiable para el resto de la partida." },
+  { name: "Beast Within", roles: ["removal"], colors: ["G"], improves: "Interaccion mas amplia", reasonTemplate: "Da una respuesta muy flexible y mejora la capacidad del deck de desatascar mesas complicadas." },
+  { name: "Heroic Intervention", roles: ["protection"], colors: ["G"], minBudgetUsd: 8, improves: "Proteccion de alto impacto", reasonTemplate: "Protege una mesa desarrollada y evita perder turnos enteros frente a removal masivo." },
+  { name: "Faithless Looting", roles: ["draw", "consistency"], colors: ["R"], improves: "Filtra manos flojas", reasonTemplate: "Ayuda a encontrar mejores piezas antes y reduce robos muertos en midgame." },
+  { name: "Abrade", roles: ["removal"], colors: ["R"], improves: "Mejora el removal flexible", reasonTemplate: "Resuelve criaturas o artefactos por poco mana y mejora la eficiencia del paquete rojo." },
+  { name: "Chaos Warp", roles: ["removal"], colors: ["R"], improves: "Amplia el alcance de las respuestas", reasonTemplate: "Permite contestar permanentes que normalmente se atascan en rojo." }
+];
+
+function buildUpgradeSummary(result: DeckBudgetUpgrades) {
+  if (result.suggestions.length === 0) {
+    return `No encontre una tanda corta de upgrades fiables para un presupuesto de ${formatBudgetUsd(result.requestedBudgetUsd)}.`;
+  }
+
+  return `Propongo ${result.suggestions.length} upgrade(s) que caben dentro de ${formatBudgetUsd(result.requestedBudgetUsd)} y priorizan consistencia, eficiencia y mejores roles para el plan del deck.`;
+}
+
+function formatBudgetUsd(value: number) {
+  return `$${value.toFixed(2)}`;
+}
+
+function colorIdentitySet(deck: StoredDeck, cards: StoredCard[]) {
+  const colors = new Set<string>();
+  for (const card of cards) {
+    for (const color of splitColors(card.colors)) {
+      const normalizedColor = color.toUpperCase();
+      if (normalizedColor && normalizedColor !== "C" && normalizedColor !== "COLORLESS") {
+        colors.add(normalizedColor);
+      }
+    }
+  }
+
+  const commander = cards.find((card) => normalize(card.name) === normalize(deck.commander));
+  for (const color of splitColors(commander?.colors)) {
+    const normalizedColor = color.toUpperCase();
+    if (normalizedColor && normalizedColor !== "C" && normalizedColor !== "COLORLESS") {
+      colors.add(normalizedColor);
+    }
+  }
+
+  return colors;
+}
+
+function candidateFitsDeck(candidate: UpgradeCandidate, deckColors: Set<string>, existingNames: Set<string>) {
+  if (existingNames.has(normalize(candidate.name))) {
+    return false;
+  }
+
+  if (candidate.colors.length === 0) {
+    return true;
+  }
+
+  return candidate.colors.every((color) => deckColors.has(color));
+}
+
+function candidatePriority(candidate: UpgradeCandidate, passport: ReturnType<typeof buildDeckPassport>, heavyCurve: boolean) {
+  let score = 0;
+
+  if (candidate.roles.includes("ramp") && passport.roles.ramp < 8) {
+    score += 5;
+  } else if (candidate.roles.includes("ramp") && passport.roles.ramp < 10) {
+    score += 3;
+  }
+
+  if (candidate.roles.includes("draw") && passport.roles.draw < 7) {
+    score += 5;
+  } else if (candidate.roles.includes("draw") && passport.roles.draw < 9) {
+    score += 3;
+  }
+
+  if (candidate.roles.includes("removal") && (passport.roles.removal + passport.roles.boardWipes) < 8) {
+    score += 5;
+  } else if (candidate.roles.includes("removal") && (passport.roles.removal + passport.roles.boardWipes) < 10) {
+    score += 3;
+  }
+
+  if (candidate.roles.includes("protection") && passport.roles.protection < 3) {
+    score += 4;
+  }
+
+  if (candidate.roles.includes("consistency")) {
+    score += heavyCurve ? 3 : 1;
+  }
+
+  return score;
+}
+
+function suggestedCutForUpgrade(cutSuggestions: DeckCutSuggestions, candidate: UpgradeCandidate) {
+  const firstByCategory = (categories: DeckCutSuggestion["category"][]) => (
+    cutSuggestions.suggestions.find((suggestion) => categories.includes(suggestion.category))?.cardName ?? null
+  );
+
+  if (candidate.roles.includes("ramp")) {
+    return firstByCategory(["too-slow", "curve-pressure", "redundant-effect"]);
+  }
+
+  if (candidate.roles.includes("draw")) {
+    return firstByCategory(["weak-standalone-value", "low-impact", "redundant-effect"]);
+  }
+
+  if (candidate.roles.includes("removal")) {
+    return firstByCategory(["low-impact", "redundant-effect", "weak-standalone-value"]);
+  }
+
+  if (candidate.roles.includes("protection")) {
+    return firstByCategory(["win-more", "curve-pressure", "low-impact"]);
+  }
+
+  return firstByCategory(["low-impact", "weak-standalone-value", "curve-pressure"]);
 }
 
 function commanderCoverUrl(deck: StoredDeck, cards: StoredCard[], allCards: StoredCard[] = cards) {
@@ -299,8 +589,9 @@ function mergeLookupMetadata(card: StoredCard, lookup: CardLookupResult) {
   };
 }
 
-async function opportunisticallyEnrichDeckMetadata(cards: StoredCard[], allCards: StoredCard[], commanderName?: string | null, limit = 96, concurrency = 8) {
-  const candidates = selectMetadataEnrichmentCandidates(cards, commanderName, limit);
+async function opportunisticallyEnrichDeckMetadata(cards: StoredCard[], allCards: StoredCard[], commanderName?: string | null, limit = 0, concurrency = 8) {
+  const effectiveLimit = limit > 0 ? limit : cards.length;
+  const candidates = selectMetadataEnrichmentCandidates(cards, commanderName, effectiveLimit);
   const failuresByReason: Record<string, number> = {};
   const results: Array<{ card: StoredCard; metadata?: ReturnType<typeof mergeLookupMetadata>; failureReason?: string }> = new Array(candidates.length);
   let nextIndex = 0;
@@ -516,6 +807,7 @@ export function toRouteResponse(result: unknown, status = 200): Response {
 }
 
 export async function getHealthText() {
+  await readDatabase();
   return "ok";
 }
 
@@ -523,9 +815,19 @@ export async function listDecks(ownerUserId?: number): Promise<Deck[]> {
   const database = await readDatabase();
   const visibleDecks = filterOwnedResources(database.decks, ownerUserId);
 
-  return [...visibleDecks]
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .map((deck) => toDeckListResponse(deck, deckCards(database.cards, deck.id)));
+  const sortedDecks = [...visibleDecks]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+
+  return Promise.all(sortedDecks.map(async (deck) => {
+    const cards = deckCards(database.cards, deck.id);
+    const deckResponse = await toDeckResponseWithCommanderCover(deck, cards, database.cards);
+
+    return {
+      ...deckResponse,
+      totalCardCount: cards.reduce((total, card) => total + quantity(card), 0),
+      cardPreview: cards.slice(0, 5).map((card) => `${card.quantity}x ${card.name}`)
+    };
+  }));
 }
 
 export async function createDeck(payload: unknown, path = "/api/decks", ownerUserId?: number): Promise<Deck | ApiRouteError> {
@@ -606,6 +908,59 @@ export async function updateDeck(deckId: number, payload: unknown, path = `/api/
     deck.format = format;
     deck.commander = normalizeNullable(body.commander) ?? "";
     return toDeckResponse(deck, cards);
+  });
+}
+
+export async function deleteDeck(deckId: number, path = `/api/decks/${deckId}`, ownerUserId?: number): Promise<null | ApiRouteError> {
+  return withDatabaseWrite((database) => {
+    const deckIndex = database.decks.findIndex((entry) => entry.id === deckId);
+    if (deckIndex < 0) {
+      return notFound(path);
+    }
+
+    const deck = database.decks[deckIndex];
+    if (ownerUserId != null && deck.ownerUserId !== ownerUserId) {
+      return notFound(path);
+    }
+
+    const removedWishlistIds = new Set(
+      database.wishlistItems
+        .filter((item) => item.deckId === deckId)
+        .map((item) => item.id)
+    );
+    const removedDeckSnapshotIds = new Set(
+      database.deckValueSnapshots
+        .filter((snapshot) => snapshot.deckId === deckId)
+        .map((snapshot) => snapshot.id)
+    );
+    const removedDeckCardIds = new Set(
+      database.cards
+        .filter((card) => card.deckId === deckId)
+        .map((card) => card.id)
+    );
+
+    database.decks.splice(deckIndex, 1);
+    database.cards = database.cards.filter((card) => card.deckId !== deckId);
+    database.wishlistItems = database.wishlistItems.filter((item) => item.deckId !== deckId);
+    database.deckCardPurchases = database.deckCardPurchases.filter((purchase) => purchase.deckId !== deckId);
+    database.deckValueSnapshots = database.deckValueSnapshots.filter((snapshot) => snapshot.deckId !== deckId);
+    database.cardValueSnapshots = database.cardValueSnapshots.filter((snapshot) => (
+      snapshot.deckId !== deckId
+      && !removedDeckSnapshotIds.has(snapshot.deckSnapshotId)
+      && (snapshot.cardId == null || !removedDeckCardIds.has(snapshot.cardId))
+    ));
+
+    // Safety cleanup in case a previous corrupted row points to now-deleted wishlist items.
+    database.deckCardPurchases = database.deckCardPurchases.map((purchase) => (
+      purchase.wishlistItemId != null && removedWishlistIds.has(purchase.wishlistItemId)
+        ? {
+            ...purchase,
+            wishlistItemId: null
+          }
+        : purchase
+    ));
+
+    return null;
   });
 }
 
@@ -1097,6 +1452,138 @@ export async function getDeckValue(deckId: number, path = `/api/decks/${deckId}`
   return tracker ?? notFound(path);
 }
 
+export async function getDeckCutSuggestions(deckId: number, path = `/api/decks/${deckId}/assistant/cuts`, ownerUserId?: number): Promise<DeckCutSuggestions | ApiRouteError> {
+  const loadedDeck = await loadDeckWithEnrichment(deckId, ownerUserId);
+  if (!loadedDeck) {
+    return notFound(path);
+  }
+
+  return buildDeckCutSuggestions(loadedDeck.deck, loadedDeck.cards);
+}
+
+export async function getDeckBudgetUpgrades(
+  deckId: number,
+  budgetUsd: number,
+  path = `/api/decks/${deckId}/assistant/upgrades`,
+  ownerUserId?: number
+): Promise<DeckBudgetUpgrades | ApiRouteError> {
+  if (!Number.isFinite(budgetUsd) || budgetUsd <= 0) {
+    return badRequest(path);
+  }
+
+  const loadedDeck = await loadDeckWithEnrichment(deckId, ownerUserId);
+  if (!loadedDeck) {
+    return notFound(path);
+  }
+
+  const { deck, cards } = loadedDeck;
+  const passport = buildDeckPassport(deck, cards);
+  const cutSuggestions = buildDeckCutSuggestions(deck, cards);
+  const deckColors = colorIdentitySet(deck, cards);
+  const existingNames = new Set(cards.map((card) => normalize(card.name)));
+  const nonLands = cards.filter((card) => !isLandCard(card));
+  const totalCards = cards.reduce((total, card) => total + quantity(card), 0);
+  const highCurveCount = nonLands.filter((card) => card.manaValue >= 5).reduce((sum, card) => sum + quantity(card), 0);
+  const heavyCurve = nonLands.length > 0 && highCurveCount >= Math.max(12, Math.floor(totalCards * 0.18));
+
+  const rankedCandidates = UPGRADE_CANDIDATES
+    .filter((candidate) => candidateFitsDeck(candidate, deckColors, existingNames))
+    .map((candidate) => ({
+      candidate,
+      score: candidatePriority(candidate, passport, heavyCurve)
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.candidate.name.localeCompare(right.candidate.name))
+    .slice(0, 10);
+
+  const warnings: string[] = [];
+  if (cards.length < 20 || totalCards < 60) {
+    warnings.push("El deck parece incompleto; las sugerencias de upgrade tienen menos contexto.");
+  }
+
+  if (rankedCandidates.length === 0) {
+    return {
+      deckId,
+      commander: deck.commander,
+      requestedBudgetUsd: Number(budgetUsd.toFixed(2)),
+      totalEstimatedSpendUsd: 0,
+      remainingBudgetUsd: Number(budgetUsd.toFixed(2)),
+      generatedAt: new Date().toISOString(),
+      status: "unavailable",
+      summary: `No encontre upgrades MVP claros para ${formatBudgetUsd(budgetUsd)} con el estado actual del deck.`,
+      warnings,
+      suggestions: []
+    };
+  }
+
+  let lookups;
+  let lookupWarnings = 0;
+  try {
+    lookups = await getCardPricesByCollection(rankedCandidates.map((entry) => ({ name: entry.candidate.name })));
+  } catch {
+    lookups = { data: [], notFound: rankedCandidates.map((entry) => ({ name: entry.candidate.name })) };
+    lookupWarnings = rankedCandidates.length;
+  }
+
+  const lookupByName = new Map(lookups.data.map((entry) => [normalize(entry.name), entry]));
+  const viableSuggestions: DeckBudgetUpgradeSuggestion[] = [];
+  let runningSpend = 0;
+  let unresolvedPrices = 0;
+
+  for (const entry of rankedCandidates) {
+    const lookup = lookupByName.get(normalize(entry.candidate.name)) ?? null;
+    const estimatedPriceUsd = lookup?.priceUsd ?? null;
+    const minBudgetUsd = entry.candidate.minBudgetUsd ?? 0;
+    if (budgetUsd < minBudgetUsd) {
+      continue;
+    }
+
+    if (estimatedPriceUsd == null) {
+      unresolvedPrices += 1;
+      continue;
+    }
+
+    const nextSpend = Number((runningSpend + estimatedPriceUsd).toFixed(2));
+    if (nextSpend > budgetUsd + 0.01) {
+      continue;
+    }
+
+    viableSuggestions.push({
+      cardName: lookup?.name ?? entry.candidate.name,
+      estimatedPriceUsd: estimatedPriceUsd == null ? null : Number(estimatedPriceUsd.toFixed(2)),
+      suggestedCutCardName: suggestedCutForUpgrade(cutSuggestions, entry.candidate),
+      improves: entry.candidate.improves,
+      reason: entry.candidate.reasonTemplate,
+      imageUrl: firstNonBlank(lookup?.imageNormal, lookup?.imageSmall)
+    });
+    runningSpend = nextSpend;
+
+    if (viableSuggestions.length >= 5) {
+      break;
+    }
+  }
+
+  if (lookupWarnings > 0 || unresolvedPrices > 0) {
+    warnings.push("Parte del precio actual no estuvo disponible; la lista se limito a upgrades con coste fiable.");
+  }
+
+  const result: DeckBudgetUpgrades = {
+    deckId,
+    commander: deck.commander,
+    requestedBudgetUsd: Number(budgetUsd.toFixed(2)),
+    totalEstimatedSpendUsd: Number(runningSpend.toFixed(2)),
+    remainingBudgetUsd: Number((budgetUsd - runningSpend).toFixed(2)),
+    generatedAt: new Date().toISOString(),
+    status: viableSuggestions.length > 0 ? (warnings.length > 0 ? "partial" : "ready") : "unavailable",
+    summary: "",
+    warnings,
+    suggestions: viableSuggestions
+  };
+  result.summary = buildUpgradeSummary(result);
+  return result;
+}
+
 export async function getDeckPortfolio(ownerUserId: number): Promise<DeckPortfolio> {
   return ensurePortfolioValueTracker(ownerUserId);
 }
+

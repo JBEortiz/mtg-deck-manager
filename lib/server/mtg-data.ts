@@ -1,7 +1,8 @@
 import { buildSpringCardQuery } from "@/lib/deck-browsing";
 import "server-only";
-import type { Card, CardFilters, Deck, DeckPassport, DeckPortfolio, DeckStats, DeckValueTracker, MulliganSample } from "@/lib/types";
+import type { BuyOpportunities, Card, CardDetail, CardFilters, CollectorOverview, Deck, DeckPassport, DeckPortfolio, DeckStats, DeckValueTracker, DeckWishlist, MulliganSample } from "@/lib/types";
 import { getDeck, getDeckPassport, getDeckPortfolio, getDeckStats, getDeckValue, getHealthText, getMulliganSample, listDeckCards, listDecks } from "@/lib/server/mtg-domain";
+import { getCardDetail, listBuyOpportunities, listCollectorOverview, listDeckWishlist } from "@/lib/server/deck-wishlist";
 
 function isApiRouteError(result: unknown): result is { status: number; body: Record<string, unknown> } {
   return Boolean(
@@ -76,4 +77,54 @@ export async function getDeckValueById(deckId: number, ownerUserId: number) {
 
 export async function getDeckPortfolioByOwner(ownerUserId: number) {
   return getDeckPortfolio(ownerUserId) as Promise<DeckPortfolio>;
+}
+
+export async function getDeckWishlistById(deckId: number, ownerUserId: number, sortBy: string | null = "best-opportunity") {
+  const result = await listDeckWishlist(deckId, sortBy, `/api/decks/${deckId}/wishlist`, ownerUserId);
+  if (isApiRouteError(result)) {
+    throw new Error(`Wishlist request failed with status ${result.status}`);
+  }
+
+  return result as DeckWishlist;
+}
+
+export async function getBuyOpportunitiesByOwner(
+  ownerUserId: number,
+  options: {
+    sort?: string | null;
+    signal?: string | null;
+    deckId?: string | number | null;
+    historyStatus?: string | null;
+  } = {}
+) {
+  const result = await listBuyOpportunities(options, "/api/buy-opportunities", ownerUserId);
+  if (isApiRouteError(result)) {
+    throw new Error(`Buy opportunities request failed with status ${result.status}`);
+  }
+
+  return result as BuyOpportunities;
+}
+
+export async function getCollectorOverviewByOwner(
+  ownerUserId: number,
+  options: {
+    sort?: string | null;
+    deckId?: string | number | null;
+    profitability?: string | null;
+    priceData?: string | null;
+  } = {}
+) {
+  const result = await listCollectorOverview(options, "/api/collector-overview", ownerUserId);
+  if (isApiRouteError(result)) {
+    throw new Error(`Collector overview request failed with status ${result.status}`);
+  }
+  return result as CollectorOverview;
+}
+
+export async function getCardDetailByIdentity(identity: string, ownerUserId: number) {
+  const result = await getCardDetail(identity, `/api/cards/${encodeURIComponent(identity)}`, ownerUserId);
+  if (isApiRouteError(result)) {
+    throw new Error(`Card detail request failed with status ${result.status}`);
+  }
+  return result as CardDetail;
 }

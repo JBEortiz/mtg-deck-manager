@@ -35,6 +35,15 @@ type DeckProfile = {
   earlyPlan: string;
 };
 
+export type DeckCardRoleFlags = {
+  boardWipe: boolean;
+  draw: boolean;
+  finisher: boolean;
+  protection: boolean;
+  ramp: boolean;
+  removal: boolean;
+};
+
 type HandAssessment = {
   fitsEarlyCurve: boolean;
   hasColorAccess: boolean;
@@ -135,6 +144,17 @@ function matchesHeuristic(card: { name: string; type: string }, heuristic: RoleH
   }
   const nameMatch = heuristic.nameTerms.some((term) => name.includes(term));
   return nameMatch && (heuristic.typeTerms.length === 0 || heuristic.typeTerms.some((term) => type.includes(term)));
+}
+
+export function classifyDeckCardRoles(card: { name: string; type: string }): DeckCardRoleFlags {
+  return {
+    ramp: RAMP_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic)),
+    draw: DRAW_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic)),
+    removal: REMOVAL_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic)),
+    boardWipe: BOARD_WIPE_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic)),
+    protection: PROTECTION_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic)),
+    finisher: FINISHER_HEURISTICS.some((heuristic) => matchesHeuristic(card, heuristic))
+  };
 }
 
 function countRole(cards: StoredCard[], heuristics: RoleHeuristic[]) {

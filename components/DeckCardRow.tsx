@@ -51,7 +51,7 @@ export default function DeckCardRow({
           </div>
         )}
       </button>
-      {actions ? <div className="deck-card-row-actions">{actions}</div> : null}
+      {actions ? <div className={`deck-card-row-actions deck-card-row-actions-${mode}`}>{actions}</div> : null}
     </article>
   );
 }

@@ -15,11 +15,18 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Error desconocido";
 }
 
-const NAV_ITEMS = [
+const AUTH_NAV_ITEMS = [
   { href: "/", label: "Inicio" },
   { href: "/decks", label: "Decks" },
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/assistant", label: "Asistente" }
+  { href: "/buy-opportunities", label: "Oportunidades" },
+  { href: "/collector-overview", label: "Compras" },
+  { href: "/portfolio", label: "Valor decks" },
+  { href: "/rules-helper", label: "Reglas" }
+];
+
+const PUBLIC_NAV_ITEMS = [
+  { href: "/", label: "Inicio" },
+  { href: "/rules-helper", label: "Reglas" }
 ];
 
 export default function AppShell({ children, currentUser }: AppShellProps) {
@@ -65,7 +72,7 @@ export default function AppShell({ children, currentUser }: AppShellProps) {
             </p>
           </div>
           <div className="header-actions">
-            <button className="btn secondary" onClick={() => void onCheckHealth()} disabled={checkingHealth}>
+            <button className="btn secondary header-utility-btn" onClick={() => void onCheckHealth()} disabled={checkingHealth}>
               {checkingHealth ? "Comprobando API..." : "Comprobar API"}
             </button>
             {currentUser ? (
@@ -77,8 +84,8 @@ export default function AppShell({ children, currentUser }: AppShellProps) {
               </>
             ) : (
               <>
-                <Link className="btn secondary" href="/sign-in">Entrar</Link>
-                <Link className="btn" href="/sign-up">Crear cuenta</Link>
+                <Link className="btn secondary header-signin-btn" href="/sign-in">Entrar</Link>
+                <Link className="btn header-primary-cta" href="/sign-up">Crear cuenta</Link>
               </>
             )}
             {health && <span className="status-badge status-ok">API: {health}</span>}
@@ -87,7 +94,7 @@ export default function AppShell({ children, currentUser }: AppShellProps) {
         </div>
 
         <nav className="app-nav" aria-label="Principal">
-          {NAV_ITEMS.map((item) => {
+          {(currentUser ? AUTH_NAV_ITEMS : PUBLIC_NAV_ITEMS).map((item) => {
             const isActive = item.href === "/" ? pathname === item.href : pathname.startsWith(item.href);
             return (
               <Link key={item.href} className={`nav-link${isActive ? " active" : ""}`} href={item.href}>

@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/lib/server/auth-route";
+import { parseJsonBody } from "@/lib/server/json-body";
 import { addDeckCard, listDeckCards, toRouteResponse } from "@/lib/server/mtg-domain";
 
 type Params = { params: Promise<{ id: string }> };
@@ -18,5 +19,11 @@ export async function POST(request: Request, { params }: Params) {
     return auth.response;
   }
   const { id } = await params;
-  return toRouteResponse(await addDeckCard(Number(id), await request.json(), `/api/decks/${id}/cards`, auth.user.id), 201);
+
+  const body = await parseJsonBody(request, "Payload invalido para agregar carta.");
+  if (!body.ok) {
+    return body.response;
+  }
+
+  return toRouteResponse(await addDeckCard(Number(id), body.value, `/api/decks/${id}/cards`, auth.user.id), 201);
 }

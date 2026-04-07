@@ -231,7 +231,7 @@ export default function MulliganCoachPanel({
                   {passport && <span className="status-badge">{passport.commander}</span>}
                 </div>
                 {passportError ? (
-                  <p className="muted">Las pistas del deck no estan disponibles hasta cargar el passport.</p>
+                  <p className="muted">Las pistas del deck no estan disponibles hasta cargar el resumen del deck.</p>
                 ) : !passport ? (
                   <p className="muted">Anade mas cartas para generar recomendaciones de mulligan mas utiles.</p>
                 ) : (

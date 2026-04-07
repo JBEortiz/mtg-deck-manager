@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -13,6 +13,20 @@ const tempDir = mkdtempSync(path.join(os.tmpdir(), "mtg-deck-manager-temp-db-"))
 const dbPath = path.join(tempDir, "mtgdeckmanager-next.sqlite");
 const [command, ...commandArgs] = args;
 
+let cleanedUp = false;
+function cleanupTempDir() {
+  if (cleanedUp) {
+    return;
+  }
+
+  cleanedUp = true;
+  try {
+    rmSync(tempDir, { recursive: true, force: true });
+  } catch {
+    // Temp cleanup is best-effort only.
+  }
+}
+
 const child = spawn(command, commandArgs, {
   stdio: "inherit",
   shell: process.platform === "win32",
@@ -22,7 +36,24 @@ const child = spawn(command, commandArgs, {
   }
 });
 
+const forwardSignal = (signal) => {
+  if (!child.killed) {
+    child.kill(signal);
+  }
+};
+
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  process.on(signal, () => forwardSignal(signal));
+}
+
+child.on("error", (error) => {
+  cleanupTempDir();
+  console.error(error);
+  process.exit(1);
+});
+
 child.on("exit", (code, signal) => {
+  cleanupTempDir();
   if (signal) {
     process.kill(process.pid, signal);
     return;

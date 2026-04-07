@@ -7,25 +7,35 @@ import { ApiClientError, loginUser, registerUser } from "@/lib/api";
 
 type AuthFormProps = {
   mode: "sign-in" | "sign-up";
+  initialError?: string;
+  initialInfo?: string;
 };
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "No se pudo completar la operacion.";
 }
 
-export default function AuthForm({ mode }: AuthFormProps) {
+function sanitizeNextPath(nextPath: string | null | undefined) {
+  if (!nextPath || !nextPath.startsWith("/") || nextPath.startsWith("//")) {
+    return "/decks";
+  }
+  return nextPath;
+}
+
+export default function AuthForm({ mode, initialError = "", initialInfo = "" }: AuthFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState(initialError);
+  const [info, setInfo] = useState(initialInfo);
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
   const [successMessage, setSuccessMessage] = useState("");
 
   const isSignUp = mode === "sign-up";
-  const nextPath = searchParams.get("next") || "/decks";
+  const nextPath = sanitizeNextPath(searchParams.get("next"));
 
   useEffect(() => {
     if (!successMessage) {
@@ -53,6 +63,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError("");
+    setInfo("");
     setFieldErrors({});
 
     const validation = isSignUp
@@ -68,12 +79,20 @@ export default function AuthForm({ mode }: AuthFormProps) {
 
     try {
       if (isSignUp) {
-        await registerUser({ email, password, confirmPassword });
+        const result = await registerUser({ email, password, confirmPassword });
+        if (result.user.authProvider === "local" && result.user.emailVerified === false) {
+          setInfo("Tu cuenta se creo con email. Verificaremos el correo en un siguiente paso sin bloquear tu acceso.");
+        }
         setSuccessMessage("Cuenta creada correctamente. Entrando en tu espacio...");
       } else {
-        await loginUser({ email, password });
-        router.push(nextPath);
-        router.refresh();
+        const result = await loginUser({ email, password });
+        if (result.user.authProvider === "local" && result.user.emailVerified === false) {
+          setInfo("Tu email aun no esta verificado. Puedes seguir usando la app con normalidad.");
+          setSuccessMessage("Sesion iniciada. Redirigiendo...");
+        } else {
+          router.push(nextPath);
+          router.refresh();
+        }
       }
     } catch (nextError) {
       if (nextError instanceof ApiClientError && nextError.errors.length > 0) {
@@ -96,6 +115,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
         <div className="notice-banner success-banner">
           <p>{successMessage}</p>
         </div>
+        {info && <p className="notice-banner">{info}</p>}
         <div className="button-row">
           <button className="btn" type="button" onClick={() => { router.push(nextPath); router.refresh(); }}>
             Continuar
@@ -113,6 +133,22 @@ export default function AuthForm({ mode }: AuthFormProps) {
           {isSignUp ? "Crea una cuenta para guardar y proteger tus decks." : "Accede para ver solo tus decks y datos."}
         </p>
       </div>
+
+      <div className="button-row auth-social-row">
+        <a className="btn secondary google-auth-btn" href={`/api/auth/google/start?next=${encodeURIComponent(nextPath)}`} aria-label="Continuar con Google">
+          <span className="google-auth-icon" aria-hidden="true">
+            <svg viewBox="0 0 18 18" role="img" focusable="false">
+              <path fill="#EA4335" d="M9 7.4v3.3h4.7c-.2 1.1-.8 2-1.7 2.6l2.7 2.1c1.6-1.5 2.5-3.8 2.5-6.4 0-.6-.1-1.1-.2-1.6H9z" />
+              <path fill="#34A853" d="M9 17.1c2.4 0 4.4-.8 5.9-2.1l-2.7-2.1c-.8.5-1.8.9-3.2.9-2.5 0-4.6-1.7-5.4-3.9L.8 12c1.5 3 4.6 5.1 8.2 5.1z" />
+              <path fill="#4A90E2" d="M3.6 9.9c-.2-.5-.3-1-.3-1.6s.1-1.1.3-1.6L.8 4.6C.3 5.7 0 7 0 8.3s.3 2.6.8 3.7l2.8-2.1z" />
+              <path fill="#FBBC05" d="M9 3.5c1.3 0 2.4.4 3.3 1.3l2.5-2.5C13.4.9 11.4 0 9 0 5.4 0 2.3 2.1.8 4.6l2.8 2.1C4.4 5.2 6.5 3.5 9 3.5z" />
+            </svg>
+          </span>
+          Continuar con Google
+        </a>
+      </div>
+
+      <p className="muted auth-divider">o usa email y contrasena</p>
 
       <form className="form" onSubmit={onSubmit}>
         <label className="field">
@@ -169,6 +205,7 @@ export default function AuthForm({ mode }: AuthFormProps) {
       </form>
 
       {error && <p className="error">{error}</p>}
+      {info && <p className="notice-banner">{info}</p>}
     </section>
   );
 }

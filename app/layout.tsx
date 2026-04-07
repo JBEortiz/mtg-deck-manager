@@ -5,7 +5,7 @@ import { getCurrentUser } from "@/lib/server/auth";
 
 export const metadata: Metadata = {
   title: "MTG Deck Manager",
-  description: "Gestion de decks, cartas y asistencia para Magic desde una unica app Next.js"
+  description: "Gestion de decks, cartas y ayuda de reglas para Magic desde una unica app Next.js"
 };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

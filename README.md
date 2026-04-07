@@ -1,20 +1,22 @@
-# MTG Deck Manager
+# MTG Deck Manager (Root Next.js App)
 
-Single-app Next.js project for browsing MTG decks, viewing deck analytics, importing/exporting decklists, and using Scryfall-backed card lookup.
+Single-app Next.js project for MTG deck management with lightweight collector-focused tooling:
+- deck summary + mulligan
+- deck-aware wishlist
+- buy signals + local price history
+- purchase tracking
+- global buy opportunities and collector overview
+- global MTG Rules Helper (non-personalized)
 
-## Final Architecture
+## Architecture
 
-- Root app: Next.js App Router
-- UI: React inside the root Next.js app
-- Backend: Next.js Route Handlers under `app/api`
-- Local persistence: SQLite file under `.data/` at runtime
-- External dependency: Scryfall API for autocomplete, card lookup, and search
-
-There is no separate Spring Boot or Vite application anymore.
+- App/UI/API: Next.js App Router + Route Handlers
+- Persistence: local SQLite (`better-sqlite3`)
+- External data: Scryfall API for card lookup/search/pricing
 
 ## Requirements
 
-- Node.js
+- Node.js 20+
 - npm
 
 ## Install
@@ -24,104 +26,72 @@ cd C:\workspace\mtg-deck-manager
 npm.cmd install
 ```
 
-## Run Locally
+## Environment
+
+Copy `.env.example` to `.env` and set values as needed.
+
+Required for production:
+- `MTG_DB_PATH`
+
+Optional:
+- `NEXT_PUBLIC_API_BASE_URL` (default `/api`)
+- `NEXT_PUBLIC_USD_TO_EUR` (default `0.92`, display conversion only)
+- Google auth:
+  - `GOOGLE_OAUTH_CLIENT_ID` (required for Google login)
+  - `GOOGLE_OAUTH_CLIENT_SECRET` (required for Google login)
+  - `GOOGLE_OAUTH_REDIRECT_URI` (optional, defaults to `<origin>/api/auth/google/callback`)
+  - `APP_BASE_URL` (optional, recommended behind proxies; used as callback origin fallback)
+  - Compatible aliases:
+    - `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+    - `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`
+
+Google callback URLs to register in Google Cloud:
+- `http://localhost:3000/api/auth/google/callback` (local dev)
+- `https://<your-domain>/api/auth/google/callback` (production)
+
+If Google login sends you to `/sign-in?authError=google_unavailable`, check the `authDetail` query parameter:
+- missing env vars: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`
+- redirect URI issues: `GOOGLE_OAUTH_REDIRECT_URI_INVALID` or `GOOGLE_OAUTH_REDIRECT_URI_MISSING`
+- fix flow:
+  1. set required Google env vars in `.env`
+  2. register callback URL in Google Cloud exactly as used by your app
+  3. restart `npm run dev`
+
+## Run
 
 Development:
 
 ```powershell
-cd C:\workspace\mtg-deck-manager
 npm.cmd run dev
 ```
 
 Production-style:
 
 ```powershell
-cd C:\workspace\mtg-deck-manager
 npm.cmd run build
 npm.cmd run start
 ```
 
-Default app URL:
+App URL by default:
 - `http://localhost:3000`
 
-## Environment Variables
+## Main Pages
 
-Optional:
-- `NEXT_PUBLIC_API_BASE_URL`
-  Use only if you intentionally want the browser client helpers to target a non-default API base.
-  Default: `/api`
-- `MTG_DB_PATH`
-  Optional path for the SQLite database file used by the root Next.js app.
-  Default: `.data/mtgdeckmanager-next.sqlite`
-
-No Spring-specific environment variables are required.
-
-## Project Structure
-
-```text
-.
-├── app/
-├── components/
-├── lib/
-├── .gitignore
-├── AGENTS.md
-├── next-env.d.ts
-├── next.config.ts
-├── package.json
-├── package-lock.json
-├── README.md
-└── tsconfig.json
-```
-
-## Main Routes
-
-Pages:
 - `/`
 - `/decks`
 - `/decks/[id]`
-- `/assistant`
+- `/buy-opportunities`
+- `/collector-overview`
+- `/rules-helper`
 
-API:
+Compatibility redirect:
+- `/assistant` -> `/rules-helper`
+
+## Health Check
+
 - `GET /api/health`
-- `GET /api/decks`
-- `POST /api/decks`
-- `GET /api/decks/{id}`
-- `PUT /api/decks/{id}`
-- `GET /api/decks/{id}/cards`
-- `POST /api/decks/{id}/cards`
-- `PUT /api/decks/{id}/cards/{cardId}`
-- `DELETE /api/decks/{id}/cards/{cardId}`
-- `GET /api/decks/{id}/stats`
-- `GET /api/decks/{id}/passport`
-- `GET /api/decks/{id}/mulligan-sample`
-- `POST /api/decks/{id}/import`
-- `GET /api/decks/{id}/export`
-- `GET /api/scryfall/autocomplete`
-- `GET /api/scryfall/card`
-- `GET /api/scryfall/search`
+- Returns `ok` only when the app and database are readable.
 
-## Local Data
+## Deployment
 
-- Runtime deck/card data is stored in `.data/mtgdeckmanager-next.sqlite`
-- The persistence layer now also stores users, sessions, and deck ownership metadata
-- Existing pre-auth decks are migrated deterministically to a bootstrap legacy owner:
-  - email: `legacy-owner@local.mtg-deck-manager.bootstrap`
-  - purpose: preserve old local decks until real user auth flows are implemented
-- `.data/` is local runtime state and should not be committed
-
-## Known Limitations
-
-- Scryfall-backed routes depend on outbound network access to `api.scryfall.com`
-- There is no `DELETE /api/decks/{id}` route because the legacy application did not expose one
-- Persistence is now SQLite-backed but still embedded/local to the app process
-
-## Manual Smoke Test
-
-1. Start the app with `npm.cmd run dev`
-2. Open `/`
-3. Create a deck
-4. Open the deck detail page
-5. Add a card
-6. Confirm stats, passport, mulligan, and export work
-7. Remove the card and confirm it disappears
-8. Check `/api/health`
+See [DEPLOYMENT.md](/C:/workspace/mtg-deck-manager/DEPLOYMENT.md) for first-release deployment steps and checklist.

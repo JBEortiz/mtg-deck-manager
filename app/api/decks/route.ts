@@ -1,4 +1,5 @@
 import { requireApiUser } from "@/lib/server/auth-route";
+import { parseJsonBody } from "@/lib/server/json-body";
 import { createDeck, listDecks, toRouteResponse } from "@/lib/server/mtg-domain";
 
 export async function GET() {
@@ -14,5 +15,11 @@ export async function POST(request: Request) {
   if (auth.response) {
     return auth.response;
   }
-  return toRouteResponse(await createDeck(await request.json(), "/api/decks", auth.user.id), 201);
+
+  const body = await parseJsonBody(request, "Payload invalido para crear deck.");
+  if (!body.ok) {
+    return body.response;
+  }
+
+  return toRouteResponse(await createDeck(body.value, "/api/decks", auth.user.id), 201);
 }

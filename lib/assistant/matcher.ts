@@ -1,4 +1,5 @@
-import { RULES_ENTRIES, RulesEntry } from "./rulesData";
+import { RULES_ENTRIES } from "./rulesData";
+import type { RulesEntry } from "./rulesData";
 
 export type RulesMatchResult = {
   entry: RulesEntry;

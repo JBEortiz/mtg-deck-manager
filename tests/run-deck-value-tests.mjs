@@ -42,6 +42,7 @@ global.fetch = async (input, init = {}) => {
         notFound.push(identifier);
         continue;
       }
+      const priceValue = priceState.get(resolvedName);
 
       data.push({
         id: id ?? `${resolvedName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-id`,
@@ -49,7 +50,7 @@ global.fetch = async (input, init = {}) => {
         cmc: resolvedName === "Mountain" ? 0 : resolvedName === "Sol Ring" ? 1 : 2,
         type_line: resolvedName === "Mountain" ? "Basic Land — Mountain" : resolvedName === "Sol Ring" ? "Artifact" : "Creature — Goblin Pirate",
         colors: resolvedName === "Mountain" ? ["R"] : resolvedName === "Dockside Extortionist" ? ["R"] : [],
-        prices: { usd: String(priceState.get(resolvedName)) },
+        prices: { usd: priceValue == null ? null : String(priceValue) },
         image_uris: {
           small: `https://img.test/${resolvedName}/small.jpg`,
           normal: `https://img.test/${resolvedName}/normal.jpg`
@@ -78,7 +79,9 @@ await runTest("deck value tracking replaces an empty baseline with the first mea
       email: "value@test.local",
       passwordHash: "hash",
       createdAt: "2026-04-05T10:00:00.000Z",
-      isBootstrapLegacyOwner: false
+      isBootstrapLegacyOwner: false,
+      preferredDisplayCurrency: "USD",
+      showPriceFreshness: true
     });
     database.nextUserId = 3;
     database.decks.push({
@@ -175,6 +178,86 @@ await runTest("current valuation refresh computes deltas, movers, and portfolio 
   assert.equal(portfolio.summary.totalDeltaValue, 12.5);
 });
 
+await runTest("newly priced cards improve coverage but do not count as comparable gains", async () => {
+  priceState.set("Mystery Card", null);
+  priceState.set("Sol Ring", 1.5);
+
+  await withDatabaseWrite((database) => {
+    database.users.push({
+      id: 4,
+      email: "coverage@test.local",
+      passwordHash: "hash",
+      createdAt: "2026-04-05T12:00:00.000Z",
+      isBootstrapLegacyOwner: false,
+      preferredDisplayCurrency: "USD",
+      showPriceFreshness: true
+    });
+    database.nextUserId = 5;
+    database.decks.push({
+      id: 3,
+      ownerUserId: 4,
+      name: "Coverage Test",
+      format: "Commander",
+      commander: "Sol Ring",
+      createdAt: "2026-04-05T12:00:00.000Z"
+    });
+    database.nextDeckId = 4;
+    initializeDeckValueTracking(database, 3, "deck-create");
+    database.cards.push(
+      {
+        id: 30,
+        deckId: 3,
+        name: "Sol Ring",
+        manaValue: 1,
+        type: "Artifact",
+        colors: "C",
+        quantity: 1,
+        scryfallId: "sol-ring-id",
+        imageSmall: null,
+        imageNormal: null,
+        imageUrl: null
+      },
+      {
+        id: 31,
+        deckId: 3,
+        name: "Mystery Card",
+        manaValue: 4,
+        type: "Creature - Weird",
+        colors: "U",
+        quantity: 2,
+        scryfallId: null,
+        imageSmall: null,
+        imageNormal: null,
+        imageUrl: null
+      }
+    );
+    database.nextCardId = 32;
+  });
+
+  await withDatabaseWrite((database) => refreshDeckValueSnapshotsInDatabase(database, 3, {
+    source: "deck-import",
+    replaceEmptyBaseline: true,
+    force: true
+  }));
+
+  priceState.set("Mystery Card", 5);
+  await withDatabaseWrite((database) => refreshDeckValueSnapshotsInDatabase(database, 3, {
+    source: "deck-read",
+    force: true
+  }));
+
+  const tracker = await ensureDeckValueTracker(3);
+  assert.ok(tracker);
+  assert.equal(tracker.baselineValue, 1.5);
+  assert.equal(tracker.currentValue, 11.5);
+  assert.equal(tracker.comparableCardCount, 1);
+  assert.equal(tracker.deltaValue, 0);
+  assert.equal(tracker.newlyPricedCardCount, 1);
+  assert.equal(tracker.newlyPricedTotalValue, 10);
+  assert.equal(tracker.topRisers.length, 0);
+  assert.equal(tracker.lostPricedCardCount, 0);
+});
+
 await runTest("local metadata reuse can repair fallback-imported cards without external lookup", async () => {
   const brokenCard = {
     id: 10,
@@ -220,7 +303,9 @@ await runTest("deleting a deck card detaches historical value snapshots instead 
       email: "delete@test.local",
       passwordHash: "hash",
       createdAt: "2026-04-05T11:00:00.000Z",
-      isBootstrapLegacyOwner: false
+      isBootstrapLegacyOwner: false,
+      preferredDisplayCurrency: "USD",
+      showPriceFreshness: true
     });
     database.nextUserId = 4;
     database.decks.push({

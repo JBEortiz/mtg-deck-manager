@@ -58,6 +58,7 @@ export async function resolveImportEntryWithFallback(
 ): Promise<ImportEntryResolution> {
   const candidates = buildLookupCandidates(entry.name);
   let lastFailure: ImportLookupError | null = null;
+  let fallbackFailure: ImportLookupError | null = null;
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index] ?? entry.name;
@@ -73,6 +74,9 @@ export async function resolveImportEntryWithFallback(
     } catch (error) {
       const failure = toLookupError(error);
       lastFailure = failure;
+      if (shouldFallbackImport(failure)) {
+        fallbackFailure = fallbackFailure ?? failure;
+      }
       if (failure.status !== 404) {
         break;
       }
@@ -91,13 +95,16 @@ export async function resolveImportEntryWithFallback(
   } catch (error) {
     const failure = toLookupError(error);
     lastFailure = failure;
+    if (shouldFallbackImport(failure)) {
+      fallbackFailure = fallbackFailure ?? failure;
+    }
   }
 
-  if (lastFailure && shouldFallbackImport(lastFailure)) {
+  if (fallbackFailure) {
     return {
       ok: true,
       entry,
-      failure: lastFailure,
+      failure: fallbackFailure,
       resolvedBy: "fallback-inferred"
     };
   }

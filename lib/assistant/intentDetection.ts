@@ -1,4 +1,4 @@
-export type AssistantIntent = "rules" | "cards" | "deck";
+export type AssistantIntent = "rules" | "cards" | "interaction";
 
 function normalize(text: string): string {
   return text
@@ -48,7 +48,9 @@ const RULES_KEYWORDS = [
   "vigilance",
   "menace",
   "equip",
-  "cascade"
+  "cascade",
+  "keyword",
+  "ability"
 ];
 
 const CARD_KEYWORDS = [
@@ -82,28 +84,22 @@ const CARD_KEYWORDS = [
   "cost"
 ];
 
-const DECK_KEYWORDS = [
-  "deck",
-  "missing",
-  "improve",
-  "upgrade",
-  "analysis",
-  "analyze",
-  "mana base",
-  "curve",
-  "consistency",
-  "synergy",
-  "cuts",
-  "what is this deck missing"
+const INTERACTION_KEYWORDS = [
+  "interaction",
+  "interactions",
+  "interact",
+  "between",
+  "with",
+  "combo"
 ];
 
 export function detectAssistantIntent(query: string): AssistantIntent {
   const rulesScore = scoreByKeywords(query, RULES_KEYWORDS);
   const cardsScore = scoreByKeywords(query, CARD_KEYWORDS);
-  const deckScore = scoreByKeywords(query, DECK_KEYWORDS);
+  const interactionScore = scoreByKeywords(query, INTERACTION_KEYWORDS);
 
-  if (deckScore >= cardsScore && deckScore >= rulesScore && deckScore > 0) {
-    return "deck";
+  if (interactionScore >= cardsScore && interactionScore >= rulesScore && interactionScore > 0) {
+    return "interaction";
   }
 
   if (cardsScore >= rulesScore && cardsScore > 0) {

@@ -6,9 +6,13 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --experimental-specifier-resolution=node tests/run-deck-ownership-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node tests/run-import-regression-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node tests/run-import-migration-regression-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-deck-value-tests.mjs",
+    "test": "node scripts/run-with-temp-db.mjs npm run test:raw",
+    "test:raw": "node --experimental-strip-types --experimental-specifier-resolution=node tests/run-deck-ownership-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-deck-delete-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-auth-google-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node tests/run-import-regression-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node tests/run-import-migration-regression-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-import-metadata-closeout-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-deck-wishlist-price-history-buy-signals-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-deck-value-tests.mjs && node --experimental-strip-types --experimental-specifier-resolution=node --loader ./tests/alias-loader.mjs tests/run-rules-helper-tests.mjs",
     "report:cleanup-candidates": "node scripts/report-deck-cleanup-candidates.mjs",
-    "run:temp-db": "node scripts/run-with-temp-db.mjs"
+    "report:pricing-coverage": "node scripts/report-pricing-coverage.mjs",
+    "run:temp-db": "node scripts/run-with-temp-db.mjs",
+    "dev:temp-db": "node scripts/run-with-temp-db.mjs npm run dev",
+    "delete:decks": "node scripts/delete-decks-by-id.mjs"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0",

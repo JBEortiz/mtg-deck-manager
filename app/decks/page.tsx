@@ -11,7 +11,11 @@ export default async function DecksPage({ searchParams }: DecksPageProps) {
   const currentUser = await redirectIfUnauthenticated("/decks");
   let decks = [] as Awaited<ReturnType<typeof getDecksByOwner>>;
   let errorMessage: string | null = null;
-  const filters = parseDeckListFilters(await searchParams);
+  const params = await searchParams;
+  const filters = parseDeckListFilters(params);
+  const initialNotice = typeof params.notice === "string" && params.notice === "deck-deleted"
+    ? "Deck eliminado correctamente."
+    : "";
 
   try {
     decks = await getDecksByOwner(currentUser.id);
@@ -19,5 +23,5 @@ export default async function DecksPage({ searchParams }: DecksPageProps) {
     errorMessage = error instanceof Error ? error.message : "Could not load decks.";
   }
 
-  return <DeckListClient initialDecks={decks} initialError={errorMessage} initialFilters={filters} />;
+  return <DeckListClient initialDecks={decks} initialError={errorMessage} initialFilters={filters} initialNotice={initialNotice} />;
 }

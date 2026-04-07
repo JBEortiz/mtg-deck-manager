@@ -5,7 +5,15 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getPasswordValidationErrors, normalizeEmail, validateLoginInput, validateRegistrationInput } from "@/lib/auth-validation";
 import type { User } from "@/lib/types";
-import { createStoredSession, createStoredUser, deleteStoredSession, getSessionById, getUserByEmail, getUserById } from "@/lib/server/mtg-store";
+import {
+  createStoredSession,
+  createStoredUser,
+  deleteStoredSession,
+  getSessionById,
+  getUserByEmail,
+  getUserById,
+  upsertGoogleUser
+} from "@/lib/server/mtg-store";
 import { hashPassword, verifyPassword } from "@/lib/server/passwords";
 
 export const SESSION_COOKIE_NAME = "mtg_session";
@@ -36,7 +44,11 @@ function sanitizeUser(user: Awaited<ReturnType<typeof getUserById>> extends infe
     id: user.id,
     email: user.email,
     createdAt: user.createdAt,
-    isBootstrapLegacyOwner: user.isBootstrapLegacyOwner
+    isBootstrapLegacyOwner: user.isBootstrapLegacyOwner,
+    authProvider: user.authProvider,
+    emailVerified: user.emailVerified,
+    preferredDisplayCurrency: user.preferredDisplayCurrency,
+    showPriceFreshness: user.showPriceFreshness
   };
 }
 
@@ -73,7 +85,13 @@ export async function registerUser(input: { email: string; password: string; con
   }
 
   const passwordHash = await hashPassword(password);
-  const user = await createStoredUser({ email, passwordHash });
+  const user = await createStoredUser({
+    email,
+    passwordHash,
+    authProvider: "local",
+    emailVerified: false,
+    emailVerifiedAt: null
+  });
   return sanitizeUser(user);
 }
 
@@ -93,9 +111,32 @@ export async function authenticateUser(input: { email: string; password: string 
 
   const user = await getUserByEmail(email);
 
-  if (!user || !(await verifyPassword(password, user.passwordHash))) {
+  if (!user) {
     throw new AuthError("invalid_credentials", "Email o contrasena incorrectos.");
   }
+
+  if (user.authProvider === "google" && user.passwordHash === "__oauth_google__") {
+    throw new AuthError("invalid_credentials", "Esta cuenta usa Google. Entra con Google para continuar.");
+  }
+
+  if (!(await verifyPassword(password, user.passwordHash))) {
+    throw new AuthError("invalid_credentials", "Email o contrasena incorrectos.");
+  }
+
+  return sanitizeUser(user);
+}
+
+export async function authenticateGoogleUser(input: { email: string; googleSubject: string; emailVerified: boolean }) {
+  const email = normalizeEmail(input.email);
+  if (!email) {
+    throw new AuthError("invalid_email", "Google no devolvio un email valido.");
+  }
+
+  const user = await upsertGoogleUser({
+    email,
+    googleSubject: input.googleSubject,
+    emailVerified: input.emailVerified
+  });
 
   return sanitizeUser(user);
 }

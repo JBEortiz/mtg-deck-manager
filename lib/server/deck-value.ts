@@ -1,6 +1,14 @@
 import "server-only";
 
-import type { CardPriceLookupResult, DeckPortfolio, DeckPortfolioSummary, DeckValueMover, DeckValueTracker, PortfolioDeckValue } from "@/lib/types";
+import type {
+  CardPriceLookupResult,
+  DeckPortfolio,
+  DeckPortfolioSummary,
+  DeckValueCoverageCard,
+  DeckValueMover,
+  DeckValueTracker,
+  PortfolioDeckValue
+} from "@/lib/types";
 import {
   readDatabase,
   type DatabaseShape,
@@ -331,10 +339,47 @@ export async function refreshDeckValueSnapshotsInDatabase(
   };
 }
 
-function buildMovers(
+function isComparablePricedRow(row: StoredCardValueSnapshot | null) {
+  return Boolean(
+    row
+    && row.status === "priced"
+    && row.totalValue != null
+    && Number.isFinite(row.totalValue)
+  );
+}
+
+function asCoverageCard(
+  key: string,
+  row: StoredCardValueSnapshot,
+  totalValue: number
+): DeckValueCoverageCard {
+  return {
+    key,
+    cardId: row.cardId ?? null,
+    cardName: row.cardName,
+    quantity: row.quantity,
+    imageUrl: row.imageUrl,
+    scryfallId: row.scryfallId ?? null,
+    totalValue: Number(totalValue.toFixed(2))
+  };
+}
+
+function buildValueComparison(
   baselineRows: StoredCardValueSnapshot[],
   currentRows: StoredCardValueSnapshot[]
-): { topRisers: DeckValueMover[]; topFallers: DeckValueMover[] } {
+): {
+  comparableBaselineValue: number;
+  comparableCurrentValue: number;
+  comparableCardCount: number;
+  newlyPricedCardCount: number;
+  newlyPricedTotalValue: number;
+  lostPricedCardCount: number;
+  lostPricedTotalValue: number;
+  newlyPricedCards: DeckValueCoverageCard[];
+  lostPricedCards: DeckValueCoverageCard[];
+  topRisers: DeckValueMover[];
+  topFallers: DeckValueMover[];
+} {
   const baselineByKey = new Map<string, StoredCardValueSnapshot>();
   const currentByKey = new Map<string, StoredCardValueSnapshot>();
 
@@ -348,34 +393,69 @@ function buildMovers(
 
   const allKeys = new Set([...baselineByKey.keys(), ...currentByKey.keys()]);
   const movers: DeckValueMover[] = [];
+  const newlyPricedCards: DeckValueCoverageCard[] = [];
+  const lostPricedCards: DeckValueCoverageCard[] = [];
+  let comparableBaselineValue = 0;
+  let comparableCurrentValue = 0;
+  let comparableCardCount = 0;
+  let newlyPricedTotalValue = 0;
+  let lostPricedTotalValue = 0;
 
   for (const key of allKeys) {
     const baseline = baselineByKey.get(key) ?? null;
     const current = currentByKey.get(key) ?? null;
-    const baselineTotalValue = baseline?.totalValue ?? 0;
-    const currentTotalValue = current?.totalValue ?? 0;
-    const deltaValue = Number((currentTotalValue - baselineTotalValue).toFixed(2));
-    if (deltaValue === 0) {
+    const baselineComparable = isComparablePricedRow(baseline);
+    const currentComparable = isComparablePricedRow(current);
+
+    if (baselineComparable && currentComparable) {
+      const baselineTotalValue = Number((baseline?.totalValue ?? 0).toFixed(2));
+      const currentTotalValue = Number((current?.totalValue ?? 0).toFixed(2));
+      comparableBaselineValue += baselineTotalValue;
+      comparableCurrentValue += currentTotalValue;
+      comparableCardCount += 1;
+
+      const deltaValue = Number((currentTotalValue - baselineTotalValue).toFixed(2));
+      if (deltaValue === 0) {
+        continue;
+      }
+
+      const deltaPercent = baselineTotalValue > 0
+        ? Number((((currentTotalValue - baselineTotalValue) / baselineTotalValue) * 100).toFixed(2))
+        : null;
+
+      movers.push({
+        key,
+        cardId: current?.cardId ?? baseline?.cardId ?? null,
+        cardName: current?.cardName ?? baseline?.cardName ?? "Carta",
+        quantity: current?.quantity ?? baseline?.quantity ?? 0,
+        imageUrl: firstNonBlank(current?.imageUrl, baseline?.imageUrl),
+        scryfallId: current?.scryfallId ?? baseline?.scryfallId ?? null,
+        baselineTotalValue,
+        currentTotalValue,
+        deltaValue,
+        deltaPercent
+      });
       continue;
     }
 
-    const deltaPercent = baselineTotalValue > 0
-      ? Number((((currentTotalValue - baselineTotalValue) / baselineTotalValue) * 100).toFixed(2))
-      : null;
+    if (!baselineComparable && currentComparable && current) {
+      const currentTotalValue = Number((current.totalValue ?? 0).toFixed(2));
+      newlyPricedTotalValue += currentTotalValue;
+      newlyPricedCards.push(asCoverageCard(key, current, currentTotalValue));
+      continue;
+    }
 
-    movers.push({
-      key,
-      cardId: current?.cardId ?? baseline?.cardId ?? null,
-      cardName: current?.cardName ?? baseline?.cardName ?? "Carta",
-      quantity: current?.quantity ?? baseline?.quantity ?? 0,
-      imageUrl: firstNonBlank(current?.imageUrl, baseline?.imageUrl),
-      scryfallId: current?.scryfallId ?? baseline?.scryfallId ?? null,
-      baselineTotalValue,
-      currentTotalValue,
-      deltaValue,
-      deltaPercent
-    });
+    if (baselineComparable && !currentComparable && baseline) {
+      const baselineTotalValue = Number((baseline.totalValue ?? 0).toFixed(2));
+      lostPricedTotalValue += baselineTotalValue;
+      lostPricedCards.push(asCoverageCard(key, baseline, baselineTotalValue));
+    }
   }
+
+  const roundedComparableBaselineValue = Number(comparableBaselineValue.toFixed(2));
+  const roundedComparableCurrentValue = Number(comparableCurrentValue.toFixed(2));
+  const roundedNewlyPricedTotalValue = Number(newlyPricedTotalValue.toFixed(2));
+  const roundedLostPricedTotalValue = Number(lostPricedTotalValue.toFixed(2));
 
   const topRisers = [...movers]
     .filter((mover) => mover.deltaValue > 0)
@@ -387,7 +467,58 @@ function buildMovers(
     .sort((left, right) => left.deltaValue - right.deltaValue)
     .slice(0, MAX_TOP_MOVERS);
 
-  return { topRisers, topFallers };
+  const topNewlyPriced = [...newlyPricedCards]
+    .sort((left, right) => right.totalValue - left.totalValue)
+    .slice(0, MAX_TOP_MOVERS);
+
+  const topLostPriced = [...lostPricedCards]
+    .sort((left, right) => right.totalValue - left.totalValue)
+    .slice(0, MAX_TOP_MOVERS);
+
+  return {
+    comparableBaselineValue: roundedComparableBaselineValue,
+    comparableCurrentValue: roundedComparableCurrentValue,
+    comparableCardCount,
+    newlyPricedCardCount: newlyPricedCards.length,
+    newlyPricedTotalValue: roundedNewlyPricedTotalValue,
+    lostPricedCardCount: lostPricedCards.length,
+    lostPricedTotalValue: roundedLostPricedTotalValue,
+    newlyPricedCards: topNewlyPriced,
+    lostPricedCards: topLostPriced,
+    topRisers,
+    topFallers
+  };
+}
+
+function buildTrackerNote(input: {
+  unavailableNote: string;
+  activeSnapshotNote: string | null;
+  comparableCardCount: number;
+  newlyPricedCardCount: number;
+  lostPricedCardCount: number;
+}) {
+  if (input.unavailableNote) {
+    return input.unavailableNote;
+  }
+
+  const comparableNote = input.comparableCardCount > 0
+    ? `Variacion real calculada sobre ${input.comparableCardCount} carta(s) con precio en base y actual.`
+    : "Aun no hay cartas comparables con precio en base y actual.";
+
+  const coverageParts: string[] = [];
+  if (input.newlyPricedCardCount > 0) {
+    coverageParts.push(`${input.newlyPricedCardCount} carta(s) con precio nuevo`);
+  }
+  if (input.lostPricedCardCount > 0) {
+    coverageParts.push(`${input.lostPricedCardCount} carta(s) sin precio actual`);
+  }
+
+  const coverageNote = coverageParts.length > 0
+    ? `Cobertura: ${coverageParts.join(" | ")}.`
+    : "Cobertura sin cambios relevantes.";
+
+  const snapshotNote = input.activeSnapshotNote ? ` ${input.activeSnapshotNote}` : "";
+  return `${comparableNote} ${coverageNote}${snapshotNote}`.trim();
 }
 
 function buildTrackerFromDatabase(database: DatabaseShape, deckId: number, usedStaleSnapshot: boolean, unavailableNote = ""): DeckValueTracker {
@@ -412,6 +543,13 @@ function buildTrackerFromDatabase(database: DatabaseShape, deckId: number, usedS
       note: unavailableNote || "Todavia no hay snapshot de valor para este deck.",
       pricedCardCount: 0,
       missingPriceCardCount: 0,
+      comparableCardCount: 0,
+      newlyPricedCardCount: 0,
+      newlyPricedTotalValue: 0,
+      lostPricedCardCount: 0,
+      lostPricedTotalValue: 0,
+      newlyPricedCards: [],
+      lostPricedCards: [],
       topRisers: [],
       topFallers: []
     };
@@ -420,11 +558,13 @@ function buildTrackerFromDatabase(database: DatabaseShape, deckId: number, usedS
   const activeCurrent = current ?? baseline;
   const baselineValue = baseline?.totalValue ?? null;
   const currentValue = activeCurrent?.totalValue ?? null;
-  const deltaValue = baselineValue != null && currentValue != null ? Number((currentValue - baselineValue).toFixed(2)) : null;
-  const deltaPercent = baselineValue != null && currentValue != null && baselineValue > 0
-    ? Number((((currentValue - baselineValue) / baselineValue) * 100).toFixed(2))
+  const comparison = buildValueComparison(baselineRows, currentRows);
+  const deltaValue = comparison.comparableCardCount > 0
+    ? Number((comparison.comparableCurrentValue - comparison.comparableBaselineValue).toFixed(2))
     : null;
-  const movers = buildMovers(baselineRows, currentRows);
+  const deltaPercent = comparison.comparableCardCount > 0 && comparison.comparableBaselineValue > 0
+    ? Number((((comparison.comparableCurrentValue - comparison.comparableBaselineValue) / comparison.comparableBaselineValue) * 100).toFixed(2))
+    : null;
 
   let status: DeckValueTracker["status"] = "ready";
   if ((activeCurrent?.pricedCardCount ?? 0) === 0 && (activeCurrent?.missingPriceCardCount ?? 0) === 0) {
@@ -447,11 +587,24 @@ function buildTrackerFromDatabase(database: DatabaseShape, deckId: number, usedS
     lastUpdated: activeCurrent?.snapshotAt ?? null,
     usedStaleSnapshot,
     status,
-    note: unavailableNote || activeCurrent?.note || (status === "empty" ? "El deck aun no tiene cartas valorables." : "Valor actualizado."),
+    note: buildTrackerNote({
+      unavailableNote,
+      activeSnapshotNote: activeCurrent?.note ?? null,
+      comparableCardCount: comparison.comparableCardCount,
+      newlyPricedCardCount: comparison.newlyPricedCardCount,
+      lostPricedCardCount: comparison.lostPricedCardCount
+    }),
     pricedCardCount: activeCurrent?.pricedCardCount ?? 0,
     missingPriceCardCount: activeCurrent?.missingPriceCardCount ?? 0,
-    topRisers: movers.topRisers,
-    topFallers: movers.topFallers
+    comparableCardCount: comparison.comparableCardCount,
+    newlyPricedCardCount: comparison.newlyPricedCardCount,
+    newlyPricedTotalValue: comparison.newlyPricedTotalValue,
+    lostPricedCardCount: comparison.lostPricedCardCount,
+    lostPricedTotalValue: comparison.lostPricedTotalValue,
+    newlyPricedCards: comparison.newlyPricedCards,
+    lostPricedCards: comparison.lostPricedCards,
+    topRisers: comparison.topRisers,
+    topFallers: comparison.topFallers
   };
 }
 

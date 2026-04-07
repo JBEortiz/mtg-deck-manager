@@ -11,6 +11,7 @@ type DeckListClientProps = {
   initialDecks: Deck[];
   initialError?: string | null;
   initialFilters: DeckListFilters;
+  initialNotice?: string;
 };
 
 function matchesDeck(deck: Deck, query: string, format: string) {
@@ -59,7 +60,7 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "No se pudo completar la operacion.";
 }
 
-export default function DeckListClient({ initialDecks, initialError = null, initialFilters }: DeckListClientProps) {
+export default function DeckListClient({ initialDecks, initialError = null, initialFilters, initialNotice = "" }: DeckListClientProps) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -73,7 +74,7 @@ export default function DeckListClient({ initialDecks, initialError = null, init
   const [commander, setCommander] = useState("");
   const [savingDeck, setSavingDeck] = useState(false);
   const [createDeckError, setCreateDeckError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(initialNotice);
   const [refreshError, setRefreshError] = useState(initialError ?? "");
 
   useEffect(() => {
@@ -85,6 +86,10 @@ export default function DeckListClient({ initialDecks, initialError = null, init
     setQuery(nextFilters.query);
     setFormat(nextFilters.format);
     setSort(nextFilters.sort);
+    const noticeParam = searchParams.get("notice");
+    if (noticeParam === "deck-deleted") {
+      setNotice("Deck eliminado correctamente.");
+    }
   }, [searchParams]);
 
   const filteredDecks = useMemo(() => {
@@ -269,7 +274,7 @@ export default function DeckListClient({ initialDecks, initialError = null, init
                 <p className="muted">Creado el {formatDate(featuredDeck.createdAt)}</p>
                 <div className="button-row deck-browser-action-row">
                   <Link className="btn compact" href={`/decks/${featuredDeck.id}`}>Abrir deck</Link>
-                  <Link className="btn subtle compact" href="/assistant">Abrir asistente</Link>
+                  <Link className="btn secondary compact" href="/rules-helper">Rules Helper</Link>
                 </div>
               </div>
             </article>
